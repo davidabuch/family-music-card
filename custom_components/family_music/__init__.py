@@ -172,6 +172,7 @@ async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
         "music/recently_played_items",
         limit=msg["limit"],
         queue_id=msg["queue_id"],
+        fully_played_only=False,
     )
     connection.send_result(
         msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
