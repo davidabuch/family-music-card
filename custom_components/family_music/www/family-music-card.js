@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.1.5";
+const CARD_VERSION = "0.1.6";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
