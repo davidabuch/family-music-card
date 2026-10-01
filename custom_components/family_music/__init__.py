@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import voluptuous as vol
-
 from homeassistant.components import frontend, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.music_assistant.helpers import get_music_assistant_client
