@@ -166,7 +166,14 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
-    """Return recently played items for one Music Assistant queue."""
+    """Return recently played items for one Music Assistant queue.
+
+    Music Assistant's playlog is user-scoped. Home Assistant playback can be
+    attributed to a service/anonymous context, so a queue may have valid played
+    items while the public playlog query returns no rows for the HA session.
+    Merge the playlog with the already-played portion of the live queue so
+    zone-specific Recents remains useful regardless of playback origin.
+    """
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     result = await mass.send_command(
         "music/recently_played_items",
@@ -174,9 +181,39 @@ async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
         queue_id=msg["queue_id"],
         fully_played_only=False,
     )
-    connection.send_result(
-        msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
+
+    recent_items = [_mapping(item) for item in result if isinstance(item, dict)]
+    seen_uris = {item.get("uri") for item in recent_items if item.get("uri")}
+
+    queue = await mass.send_command("player_queues/get", queue_id=msg["queue_id"])
+    queue_items = await mass.send_command(
+        "player_queues/items",
+        queue_id=msg["queue_id"],
+        limit=500,
+        offset=0,
     )
+    current_index = queue.get("current_index") if isinstance(queue, dict) else None
+    if isinstance(queue_items, list):
+        if isinstance(current_index, int):
+            played_queue_items = queue_items[: current_index + 1]
+        else:
+            played_queue_items = queue_items
+        for queue_item in reversed(played_queue_items):
+            if not isinstance(queue_item, dict):
+                continue
+            media_item = queue_item.get("media_item")
+            if not isinstance(media_item, dict):
+                continue
+            mapped = _mapping(media_item)
+            uri = mapped.get("uri")
+            if not uri or uri in seen_uris:
+                continue
+            recent_items.append(mapped)
+            seen_uris.add(uri)
+            if len(recent_items) >= msg["limit"]:
+                break
+
+    connection.send_result(msg["id"], recent_items[: msg["limit"]])
 
 
 @websocket_api.websocket_command(
