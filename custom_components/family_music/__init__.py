@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import frontend, websocket_api
@@ -23,6 +24,111 @@ def _provider_list(provider: str) -> list[str]:
     return ["apple_music", "spotify"]
 
 
+def _image(item: dict[str, Any]) -> str | None:
+    """Return the first usable image URL from a Music Assistant item."""
+    direct = item.get("image")
+    if isinstance(direct, str) and direct:
+        return direct
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    images = metadata.get("images")
+    if not isinstance(images, list):
+        return None
+    for image in images:
+        if isinstance(image, dict) and isinstance(image.get("path"), str):
+            return image["path"]
+    return None
+
+
+def _mapping(item: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact media item safe and convenient for the Lovelace card."""
+    result: dict[str, Any] = {
+        "media_type": item.get("media_type"),
+        "uri": item.get("uri"),
+        "name": item.get("name"),
+        "version": item.get("version") or "",
+        "image": _image(item),
+        "favorite": bool(item.get("favorite", False)),
+    }
+    artists = item.get("artists")
+    if isinstance(artists, list):
+        result["artists"] = [
+            {
+                "media_type": artist.get("media_type", "artist"),
+                "uri": artist.get("uri"),
+                "name": artist.get("name"),
+                "image": _image(artist),
+            }
+            for artist in artists
+            if isinstance(artist, dict)
+        ]
+    album = item.get("album")
+    if isinstance(album, dict):
+        result["album"] = {
+            "media_type": album.get("media_type", "album"),
+            "uri": album.get("uri"),
+            "name": album.get("name"),
+            "image": _image(album),
+        }
+    for key in ("duration", "disc_number", "track_number", "year", "album_type"):
+        if item.get(key) is not None:
+            result[key] = item[key]
+    return result
+
+
+def _normalize_search(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Normalize Music Assistant search output for the frontend."""
+    return {
+        key: [_mapping(item) for item in result.get(key, []) if isinstance(item, dict)]
+        for key in ("artists", "albums", "tracks", "playlists", "radio")
+    }
+
+
+def _has_exact_apple_artist(result: dict[str, Any], query: str) -> bool:
+    """Return whether search results contain the exact Apple Music artist."""
+    wanted = query.casefold().strip()
+    for artist in result.get("artists", []):
+        if not isinstance(artist, dict):
+            continue
+        if (artist.get("name") or "").casefold().strip() != wanted:
+            continue
+        if str(artist.get("uri") or "").startswith("apple_music"):
+            return True
+    return False
+
+
+async def _add_apple_exact_artist_fallback(
+    mass, result: dict[str, Any], query: str, limit: int
+) -> None:
+    """Recover Apple artists missed by Apple's bare-name ranking.
+
+    Apple Music can return related members instead of the band for a bare query
+    (for example, "Eagles" returns Don Henley). A bounded "The <name>" artist
+    search often exposes the exact provider-native artist identifier needed for
+    artist -> album browsing. Only an exact-name match is promoted.
+    """
+    if _has_exact_apple_artist(result, query):
+        return
+    fallback = await mass.send_command(
+        "music/search",
+        search_query=f"The {query}",
+        media_types=["artist"],
+        limit=min(limit, 20),
+        providers=["apple_music"],
+    )
+    wanted = query.casefold().strip()
+    for artist in fallback.get("artists", []):
+        if not isinstance(artist, dict):
+            continue
+        if (artist.get("name") or "").casefold().strip() != wanted:
+            continue
+        if not str(artist.get("uri") or "").startswith("apple_music"):
+            continue
+        result.setdefault("artists", []).insert(0, artist)
+        return
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "family_music/search",
@@ -34,7 +140,7 @@ def _provider_list(provider: str) -> list[str]:
 )
 @websocket_api.async_response
 async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
-    """Search the selected Music Assistant providers without exposing an MA token."""
+    """Search selected Music Assistant providers without exposing an MA token."""
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     result = await mass.send_command(
         "music/search",
@@ -43,7 +149,9 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
         limit=msg["limit"],
         providers=_provider_list(msg["provider"]),
     )
-    connection.send_result(msg["id"], result)
+    if msg["provider"] in ("apple", "all"):
+        await _add_apple_exact_artist_fallback(mass, result, msg["query"], msg["limit"])
+    connection.send_result(msg["id"], _normalize_search(result))
 
 
 @websocket_api.websocket_command(
@@ -63,7 +171,9 @@ async def ws_artist_albums(hass: HomeAssistant, connection, msg: dict) -> None:
         item_id=msg["item_id"],
         provider_instance_id_or_domain=msg["provider"],
     )
-    connection.send_result(msg["id"], result)
+    connection.send_result(
+        msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
+    )
 
 
 @websocket_api.websocket_command(
@@ -83,7 +193,9 @@ async def ws_album_tracks(hass: HomeAssistant, connection, msg: dict) -> None:
         item_id=msg["item_id"],
         provider_instance_id_or_domain=msg["provider"],
     )
-    connection.send_result(msg["id"], result)
+    connection.send_result(
+        msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
+    )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
