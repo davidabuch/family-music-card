@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.5"
+    assert manifest["version"] == "0.1.6"
     assert card_path.exists()
 
 
@@ -54,3 +54,12 @@ def test_recents_fall_back_to_live_queue_history():
     assert '"player_queues/items"' in recents_block
     assert "current_index" in recents_block
     assert "reversed(played_queue_items)" in recents_block
+
+
+def test_favorites_include_native_sonos_browser():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    assert '"favorites_folder"' in init_text
+    assert '"object.container.album.musicAlbum"' in init_text
+    assert '"object.container.playlistContainer"' in init_text
+    assert '"object.item.audioItem.audioBroadcast"' in init_text
+    assert "sonos_favorite" in init_text
