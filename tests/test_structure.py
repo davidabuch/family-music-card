@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.8"
+    assert manifest["version"] == "0.1.9"
     assert card_path.exists()
 
 
@@ -84,3 +84,18 @@ def test_fast_refresh_and_volume_step_controls():
     assert "current - 5" in card_text
     assert "current + 5" in card_text
     assert 'addEventListener("input"' in card_text
+
+
+def test_track_progress_and_mute_controls():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="trackProgress"' in card_text
+    assert 'id="elapsed"' in card_text
+    assert 'id="remaining"' in card_text
+    assert "media_position_updated_at" in card_text
+    assert "media_duration" in card_text
+    assert 'id="muteToggle"' in card_text
+    assert '"volume_mute"' in card_text
+    assert "is_volume_muted" in card_text
+    assert '"mdi:volume-off"' in card_text

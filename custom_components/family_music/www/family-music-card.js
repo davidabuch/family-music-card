@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.1.8";
+const CARD_VERSION = "0.1.9";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -306,7 +306,14 @@ class FamilyMusicCard extends HTMLElement {
               <button id="playPause" class="play-button"><ha-icon icon="mdi:play"></ha-icon></button>
               <button id="next" class="transport-button"><ha-icon icon="mdi:skip-next"></ha-icon></button>
             </div>
+            <div class="progress-wrap">
+              <div class="progress-time"><span id="elapsed">0:00</span><span id="remaining">-0:00</span></div>
+              <progress id="trackProgress" class="track-progress" max="100" value="0"></progress>
+            </div>
             <div class="volume-row">
+              <button id="muteToggle" class="volume-step mute-toggle" title="Mute" aria-label="Mute">
+                <ha-icon icon="mdi:volume-high"></ha-icon>
+              </button>
               <button id="volumeDown" class="volume-step" title="Volume down" aria-label="Volume down">
                 <ha-icon icon="mdi:chevron-left"></ha-icon>
               </button>
@@ -552,6 +559,30 @@ class FamilyMusicCard extends HTMLElement {
     `;
   }
 
+  _formatTime(seconds) {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const whole = Math.floor(seconds);
+    const minutes = Math.floor(whole / 60);
+    const remainder = whole % 60;
+    return `${minutes}:${String(remainder).padStart(2, "0")}`;
+  }
+
+  _estimatedPosition(state, attrs) {
+    const duration = Number(attrs.media_duration);
+    let position = Number(attrs.media_position);
+    if (!Number.isFinite(position)) position = 0;
+    if (state.state === "playing" && attrs.media_position_updated_at) {
+      const updatedAt = Date.parse(attrs.media_position_updated_at);
+      if (Number.isFinite(updatedAt)) {
+        position += Math.max(0, (Date.now() - updatedAt) / 1000);
+      }
+    }
+    if (Number.isFinite(duration) && duration > 0) {
+      position = Math.min(position, duration);
+    }
+    return Math.max(0, position);
+  }
+
   _setVolume(percent) {
     if (!this._selectedPlayer) return;
     const bounded = Math.max(0, Math.min(100, Math.round(percent)));
@@ -599,6 +630,16 @@ class FamilyMusicCard extends HTMLElement {
           entity_id: this._selectedPlayer,
         });
       }
+    });
+    this.shadowRoot.getElementById("muteToggle")?.addEventListener("click", () => {
+      if (!this._selectedPlayer) return;
+      const muted = Boolean(
+        this._hass?.states?.[this._selectedPlayer]?.attributes?.is_volume_muted
+      );
+      this._hass.callService("media_player", "volume_mute", {
+        entity_id: this._selectedPlayer,
+        is_volume_muted: !muted,
+      });
     });
     this.shadowRoot.getElementById("volume")?.addEventListener("input", (event) => {
       this._setVolume(Number(event.target.value));
@@ -723,6 +764,10 @@ class FamilyMusicCard extends HTMLElement {
     const meta = this.shadowRoot.getElementById("trackMeta");
     const playPause = this.shadowRoot.getElementById("playPause");
     const volume = this.shadowRoot.getElementById("volume");
+    const muteToggle = this.shadowRoot.getElementById("muteToggle");
+    const progress = this.shadowRoot.getElementById("trackProgress");
+    const elapsed = this.shadowRoot.getElementById("elapsed");
+    const remaining = this.shadowRoot.getElementById("remaining");
     const hero = this.shadowRoot.getElementById("hero");
 
     if (title) title.textContent = attrs.media_title || "Nothing playing";
@@ -735,6 +780,32 @@ class FamilyMusicCard extends HTMLElement {
     }
     if (volume && attrs.volume_level != null) {
       volume.value = Math.round(attrs.volume_level * 100);
+    }
+    if (muteToggle) {
+      const muted = Boolean(attrs.is_volume_muted);
+      muteToggle.title = muted ? "Unmute" : "Mute";
+      muteToggle.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+      muteToggle.innerHTML = `<ha-icon icon="${muted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>`;
+      muteToggle.classList.toggle("muted", muted);
+    }
+
+    const duration = Number(attrs.media_duration);
+    const position = this._estimatedPosition(state, attrs);
+    if (progress) {
+      if (Number.isFinite(duration) && duration > 0) {
+        progress.max = duration;
+        progress.value = Math.min(position, duration);
+      } else {
+        progress.max = 100;
+        progress.value = 0;
+      }
+    }
+    if (elapsed) elapsed.textContent = this._formatTime(position);
+    if (remaining) {
+      const remain = Number.isFinite(duration) && duration > 0
+        ? Math.max(0, duration - position)
+        : 0;
+      remaining.textContent = `-${this._formatTime(remain)}`;
     }
 
     const picture = attrs.entity_picture_local || attrs.entity_picture;
@@ -767,7 +838,8 @@ class FamilyMusicCard extends HTMLElement {
       .controls-card{position:absolute;left:16px;right:16px;bottom:16px;padding:14px;border-radius:18px;background:rgba(255,255,255,.9);color:#333;backdrop-filter:blur(14px);z-index:2}
       .transport{display:flex;align-items:center;justify-content:center;gap:18px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
       .transport-button{width:46px;height:46px;background:transparent;color:#444}.play-button{width:64px;height:64px;background:#666;color:#fff}.play-button ha-icon{--mdc-icon-size:34px}.transport-button ha-icon{--mdc-icon-size:29px}
-      .volume-row{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;gap:8px;align-items:center;margin-top:10px}.volume{width:100%}.volume-step{width:42px;height:42px;border-radius:50%;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.62);color:#444;display:flex;align-items:center;justify-content:center;cursor:pointer}.volume-step ha-icon{--mdc-icon-size:27px}
+      .progress-wrap{margin-top:10px}.progress-time{display:flex;justify-content:space-between;font-size:11px;color:#666;margin-bottom:3px}.track-progress{width:100%;height:6px;appearance:none;-webkit-appearance:none;border:0;border-radius:999px;overflow:hidden;background:rgba(0,0,0,.12)}.track-progress::-webkit-progress-bar{background:rgba(0,0,0,.12);border-radius:999px}.track-progress::-webkit-progress-value{background:var(--primary-color);border-radius:999px}.track-progress::-moz-progress-bar{background:var(--primary-color);border-radius:999px}
+      .volume-row{display:grid;grid-template-columns:42px 42px minmax(0,1fr) 42px;gap:8px;align-items:center;margin-top:8px}.volume{width:100%}.volume-step{width:42px;height:42px;border-radius:50%;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.62);color:#444;display:flex;align-items:center;justify-content:center;cursor:pointer}.volume-step ha-icon{--mdc-icon-size:27px}.mute-toggle.muted{background:#666;color:#fff}
       .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
       .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
