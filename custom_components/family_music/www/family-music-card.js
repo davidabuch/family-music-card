@@ -14,6 +14,10 @@ class FamilyMusicCard extends HTMLElement {
     this._selectedArtist = null;
     this._selectedAlbum = null;
     this._albumTracks = [];
+    this._recents = [];
+    this._favorites = null;
+    this._artistReturnView = "search";
+    this._albumReturnView = "search";
     this._busy = false;
   }
 
@@ -107,6 +111,7 @@ class FamilyMusicCard extends HTMLElement {
     const parsed = this._parseUri(item.uri);
     if (!parsed) return;
     this._busy = true;
+    this._artistReturnView = this._view;
     this._selectedArtist = item;
     this._selectedAlbum = null;
     this._albumTracks = [];
@@ -130,6 +135,7 @@ class FamilyMusicCard extends HTMLElement {
     const parsed = this._parseUri(item.uri);
     if (!parsed) return;
     this._busy = true;
+    this._albumReturnView = this._view;
     this._selectedAlbum = item;
     this._albumTracks = [];
     this._view = "album";
@@ -170,6 +176,49 @@ class FamilyMusicCard extends HTMLElement {
       });
     }
     await this._play(this._selectedAlbum, "play");
+  }
+
+  _queueId() {
+    return this._hass?.states?.[this._selectedPlayer]?.attributes?.active_queue || null;
+  }
+
+  async _openRecents() {
+    this._view = "recents";
+    this._busy = true;
+    this._recents = [];
+    this._render();
+    const queueId = this._queueId();
+    if (!queueId) {
+      this._busy = false;
+      this._render();
+      return;
+    }
+    try {
+      const items = await this._ws("family_music/recents", {
+        queue_id: queueId,
+        limit: 40,
+      });
+      this._recents = Array.isArray(items) ? items : [];
+    } catch (error) {
+      this._recents = [{ error: error?.message || String(error) }];
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _openFavorites() {
+    this._view = "favorites";
+    this._busy = true;
+    this._render();
+    try {
+      this._favorites = await this._ws("family_music/favorites", { limit: 40 });
+    } catch (error) {
+      this._favorites = { error: error?.message || String(error) };
+    } finally {
+      this._busy = false;
+      this._render();
+    }
   }
 
   _setView(view) {
