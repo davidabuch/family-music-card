@@ -24,8 +24,11 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Ruff
-        run: pip install ruff
+      - name: Install validation tools
+        run: pip install pytest ruff
+
+      - name: Pytest
+        run: pytest -q
 
       - name: Ruff
         run: ruff check custom_components tests

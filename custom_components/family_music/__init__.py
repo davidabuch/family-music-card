@@ -154,6 +154,63 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], _normalize_search(result))
 
 
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "family_music/recents",
+        vol.Required("config_entry_id"): str,
+        vol.Required("queue_id"): str,
+        vol.Optional("limit", default=40): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    }
+)
+@websocket_api.async_response
+async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Return user-initiated recently played items for one Music Assistant queue."""
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    result = await mass.send_command(
+        "music/recently_played_items",
+        limit=msg["limit"],
+        queue_id=msg["queue_id"],
+        user_initiated_only=True,
+    )
+    connection.send_result(
+        msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "family_music/favorites",
+        vol.Required("config_entry_id"): str,
+        vol.Optional("limit", default=40): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    }
+)
+@websocket_api.async_response
+async def ws_favorites(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Return Music Assistant favorites grouped by supported media type."""
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    commands = {
+        "artists": "music/artists/library_items",
+        "albums": "music/albums/library_items",
+        "tracks": "music/tracks/library_items",
+        "playlists": "music/playlists/library_items",
+        "radio": "music/radios/library_items",
+    }
+    favorites: dict[str, list[dict[str, Any]]] = {}
+    for key, command in commands.items():
+        items = await mass.send_command(
+            command,
+            favorite=True,
+            limit=msg["limit"],
+            offset=0,
+            order_by="sort_name",
+            summary=False,
+        )
+        favorites[key] = [_mapping(item) for item in items if isinstance(item, dict)]
+    connection.send_result(msg["id"], favorites)
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "family_music/artist_albums",
@@ -207,6 +264,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         frontend.add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
         websocket_api.async_register_command(hass, ws_search)
+        websocket_api.async_register_command(hass, ws_recents)
+        websocket_api.async_register_command(hass, ws_favorites)
         websocket_api.async_register_command(hass, ws_artist_albums)
         websocket_api.async_register_command(hass, ws_album_tracks)
         hass.data[DOMAIN]["registered"] = True

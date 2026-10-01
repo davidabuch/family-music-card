@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.1.1";
+const CARD_VERSION = "0.1.2";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -14,6 +14,10 @@ class FamilyMusicCard extends HTMLElement {
     this._selectedArtist = null;
     this._selectedAlbum = null;
     this._albumTracks = [];
+    this._recents = [];
+    this._favorites = null;
+    this._artistReturnView = "search";
+    this._albumReturnView = "search";
     this._busy = false;
   }
 
@@ -107,6 +111,7 @@ class FamilyMusicCard extends HTMLElement {
     const parsed = this._parseUri(item.uri);
     if (!parsed) return;
     this._busy = true;
+    this._artistReturnView = this._view;
     this._selectedArtist = item;
     this._selectedAlbum = null;
     this._albumTracks = [];
@@ -130,6 +135,7 @@ class FamilyMusicCard extends HTMLElement {
     const parsed = this._parseUri(item.uri);
     if (!parsed) return;
     this._busy = true;
+    this._albumReturnView = this._view;
     this._selectedAlbum = item;
     this._albumTracks = [];
     this._view = "album";
@@ -170,6 +176,49 @@ class FamilyMusicCard extends HTMLElement {
       });
     }
     await this._play(this._selectedAlbum, "play");
+  }
+
+  _queueId() {
+    return this._hass?.states?.[this._selectedPlayer]?.attributes?.active_queue || null;
+  }
+
+  async _openRecents() {
+    this._view = "recents";
+    this._busy = true;
+    this._recents = [];
+    this._render();
+    const queueId = this._queueId();
+    if (!queueId) {
+      this._busy = false;
+      this._render();
+      return;
+    }
+    try {
+      const items = await this._ws("family_music/recents", {
+        queue_id: queueId,
+        limit: 40,
+      });
+      this._recents = Array.isArray(items) ? items : [];
+    } catch (error) {
+      this._recents = [{ error: error?.message || String(error) }];
+    } finally {
+      this._busy = false;
+      this._render();
+    }
+  }
+
+  async _openFavorites() {
+    this._view = "favorites";
+    this._busy = true;
+    this._render();
+    try {
+      this._favorites = await this._ws("family_music/favorites", { limit: 40 });
+    } catch (error) {
+      this._favorites = { error: error?.message || String(error) };
+    } finally {
+      this._busy = false;
+      this._render();
+    }
   }
 
   _setView(view) {
@@ -218,21 +267,24 @@ class FamilyMusicCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div class="nav-strip">
-          <button class="nav-button active"><ha-icon icon="mdi:home"></ha-icon></button>
-          <button id="navSearch" class="nav-button"><ha-icon icon="mdi:magnify"></ha-icon></button>
-        </div>
+        ${this._renderNavStrip("now")}
       </div>
     `;
   }
 
   _renderBrowserView() {
+    const playerName =
+      this._hass?.states?.[this._selectedPlayer]?.attributes?.friendly_name || "this zone";
     const title =
       this._view === "artist"
         ? this._selectedArtist?.name || "Artist"
         : this._view === "album"
           ? this._selectedAlbum?.name || "Album"
-          : "Choose Music";
+          : this._view === "recents"
+            ? `Recent · ${playerName}`
+            : this._view === "favorites"
+              ? "Favorites"
+              : "Choose Music";
 
     return `
       <div class="browser-shell">
@@ -243,6 +295,27 @@ class FamilyMusicCard extends HTMLElement {
         </div>
         ${this._view === "search" ? this._renderSearchControls() : ""}
         <div id="browserBody" class="browser-body">${this._renderBrowserBodyMarkup()}</div>
+        ${this._renderNavStrip(this._view)}
+      </div>
+    `;
+  }
+
+  _renderNavStrip(activeView = this._view) {
+    const active = ["artist", "album"].includes(activeView) ? "" : activeView;
+    return `
+      <div class="nav-strip">
+        <button id="navNow" class="nav-button ${active === "now" ? "active" : ""}" title="Now Playing">
+          <ha-icon icon="mdi:home"></ha-icon><span>Now</span>
+        </button>
+        <button id="navRecents" class="nav-button ${active === "recents" ? "active" : ""}" title="Recent for this zone">
+          <ha-icon icon="mdi:history"></ha-icon><span>Recents</span>
+        </button>
+        <button id="navFavorites" class="nav-button ${active === "favorites" ? "active" : ""}" title="Favorites">
+          <ha-icon icon="mdi:heart"></ha-icon><span>Favorites</span>
+        </button>
+        <button id="navSearch" class="nav-button ${active === "search" ? "active" : ""}" title="Search">
+          <ha-icon icon="mdi:magnify"></ha-icon><span>Search</span>
+        </button>
       </div>
     `;
   }
@@ -307,6 +380,40 @@ class FamilyMusicCard extends HTMLElement {
       `;
     }
 
+    if (this._view === "recents") {
+      if (this._recents[0]?.error) {
+        return `<div class="status error">${this._escape(this._recents[0].error)}</div>`;
+      }
+      if (!this._queueId()) {
+        return '<div class="status">No Music Assistant queue is available for this zone yet.</div>';
+      }
+      return this._recents.length
+        ? this._section("Recently Played", this._recents.map((item) => this._recentRow(item)).join(""), "recent-list")
+        : '<div class="status">Nothing has been played recently in this zone.</div>';
+    }
+
+    if (this._view === "favorites") {
+      if (this._favorites?.error) {
+        return `<div class="status error">${this._escape(this._favorites.error)}</div>`;
+      }
+      if (!this._favorites) {
+        return '<div class="status">Loading favorites…</div>';
+      }
+      const artists = this._favorites.artists || [];
+      const albums = this._favorites.albums || [];
+      const tracks = this._favorites.tracks || [];
+      const playlists = this._favorites.playlists || [];
+      const radio = this._favorites.radio || [];
+      const markup = [
+        this._section("Artists", artists.map((item) => this._artistTile(item)).join("")),
+        this._section("Albums", albums.map((item) => this._albumTile(item)).join("")),
+        this._section("Tracks", tracks.map((item, index) => this._trackRow(item, index + 1)).join(""), "track-list"),
+        this._section("Playlists", playlists.map((item) => this._albumTile(item)).join("")),
+        this._section("Radio", radio.map((item) => this._albumTile(item)).join("")),
+      ].join("");
+      return markup || '<div class="status">No favorites found in Music Assistant.</div>';
+    }
+
     if (!this._searchResults) {
       return '<div class="status">Search for an artist, album, song, playlist or station.</div>';
     }
@@ -361,6 +468,23 @@ class FamilyMusicCard extends HTMLElement {
     `;
   }
 
+  _recentRow(item) {
+    const subtitle = [this._artistName(item), item.album?.name].filter(Boolean).join(" · ");
+    const typeLabel = String(item.media_type || "music")
+      .replaceAll("_", " ")
+      .replace(/^./, (value) => value.toUpperCase());
+    return `
+      <button class="recent-row recent-item" data-uri="${this._escape(item.uri)}">
+        <div class="recent-thumb">${item.image ? `<img src="${this._escape(item.image)}">` : '<ha-icon icon="mdi:music"></ha-icon>'}</div>
+        <div class="recent-copy">
+          <div class="recent-title">${this._escape(item.name)}</div>
+          <div class="recent-subtitle">${this._escape(subtitle || this._providerLabel(item.uri))}</div>
+        </div>
+        <span class="recent-type">${this._escape(typeLabel)}</span>
+      </button>
+    `;
+  }
+
   _trackRow(item, index) {
     return `
       <button class="track-row track-item" data-uri="${this._escape(item.uri)}">
@@ -390,6 +514,9 @@ class FamilyMusicCard extends HTMLElement {
     };
     this.shadowRoot.getElementById("openSearch")?.addEventListener("click", openSearch);
     this.shadowRoot.getElementById("navSearch")?.addEventListener("click", openSearch);
+    this.shadowRoot.getElementById("navNow")?.addEventListener("click", () => this._setView("now"));
+    this.shadowRoot.getElementById("navRecents")?.addEventListener("click", () => this._openRecents());
+    this.shadowRoot.getElementById("navFavorites")?.addEventListener("click", () => this._openFavorites());
 
     this.shadowRoot.getElementById("prev")?.addEventListener("click", () => {
       if (this._selectedPlayer) {
@@ -420,8 +547,8 @@ class FamilyMusicCard extends HTMLElement {
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
     this.shadowRoot.getElementById("browserBack")?.addEventListener("click", () => {
-      if (this._view === "album") this._setView("artist");
-      else if (this._view === "artist") this._setView("search");
+      if (this._view === "album") this._setView(this._albumReturnView || "search");
+      else if (this._view === "artist") this._setView(this._artistReturnView || "search");
       else this._setView("now");
     });
 
@@ -452,7 +579,11 @@ class FamilyMusicCard extends HTMLElement {
 
     body.querySelectorAll(".artist-item").forEach((element) => {
       element.addEventListener("click", () => {
-        const item = (this._searchResults?.artists || []).find((candidate) => candidate.uri === element.dataset.uri);
+        const artists = [
+          ...(this._searchResults?.artists || []),
+          ...(this._favorites?.artists || []),
+        ];
+        const item = artists.find((candidate) => candidate.uri === element.dataset.uri);
         if (item) this._openArtist(item);
       });
     });
@@ -464,6 +595,9 @@ class FamilyMusicCard extends HTMLElement {
           ...(this._searchResults?.albums || []),
           ...(this._searchResults?.playlists || []),
           ...(this._searchResults?.radio || []),
+          ...(this._favorites?.albums || []),
+          ...(this._favorites?.playlists || []),
+          ...(this._favorites?.radio || []),
         ];
         const item = collections.find((candidate) => candidate.uri === element.dataset.uri);
         if (!item) return;
@@ -474,9 +608,23 @@ class FamilyMusicCard extends HTMLElement {
 
     body.querySelectorAll(".track-item").forEach((element) => {
       element.addEventListener("click", () => {
-        const collections = [...this._albumTracks, ...(this._searchResults?.tracks || [])];
+        const collections = [
+          ...this._albumTracks,
+          ...(this._searchResults?.tracks || []),
+          ...(this._favorites?.tracks || []),
+        ];
         const item = collections.find((candidate) => candidate.uri === element.dataset.uri);
         if (item) this._play(item);
+      });
+    });
+
+    body.querySelectorAll(".recent-item").forEach((element) => {
+      element.addEventListener("click", () => {
+        const item = this._recents.find((candidate) => candidate.uri === element.dataset.uri);
+        if (!item) return;
+        if (item.media_type === "artist") this._openArtist(item);
+        else if (item.media_type === "album") this._openAlbum(item);
+        else this._play(item);
       });
     });
   }
@@ -549,8 +697,8 @@ class FamilyMusicCard extends HTMLElement {
       .transport{display:flex;align-items:center;justify-content:center;gap:18px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
       .transport-button{width:46px;height:46px;background:transparent;color:#444}.play-button{width:64px;height:64px;background:#666;color:#fff}.play-button ha-icon{--mdc-icon-size:34px}.transport-button ha-icon{--mdc-icon-size:29px}
       .volume-row{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:center;margin-top:10px}.volume{width:100%}
-      .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color)}
-      .nav-button{width:52px;height:52px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer}.nav-button ha-icon{--mdc-icon-size:31px}.nav-button.active{color:var(--primary-color)}
+      .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
+      .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}
       .browser-title{font-size:23px;font-weight:800;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.provider-row{display:flex;gap:8px;flex-wrap:wrap;padding:14px 14px 0}
       .provider-chip{border:1px solid var(--divider-color);border-radius:999px;padding:9px 13px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-weight:700;cursor:pointer}
@@ -566,10 +714,12 @@ class FamilyMusicCard extends HTMLElement {
       .track-row{width:100%;display:grid;grid-template-columns:24px 50px minmax(0,1fr) auto;gap:10px;align-items:center;border:0;border-radius:12px;background:transparent;color:var(--primary-text-color);padding:6px;text-align:left;cursor:pointer}
       .track-row:hover{background:var(--secondary-background-color)}.track-index{color:var(--secondary-text-color);text-align:center}.track-thumb{width:50px;height:50px;border-radius:10px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}
       .track-copy{min-width:0}.track-row-title{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-row-subtitle{font-size:12px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .track-source{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}.album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
+      .track-source{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}
+      .recent-list{display:flex;flex-direction:column;gap:6px}.recent-row{width:100%;display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:11px;align-items:center;border:0;border-radius:14px;background:transparent;color:var(--primary-text-color);padding:7px;text-align:left;cursor:pointer}.recent-row:hover{background:var(--secondary-background-color)}.recent-thumb{width:58px;height:58px;border-radius:12px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.recent-thumb img{width:100%;height:100%;object-fit:cover}.recent-copy{min-width:0}.recent-title{font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-subtitle{margin-top:3px;font-size:12px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-type{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}
+      .album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
       .album-art{width:150px;height:150px;border-radius:18px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.album-art ha-icon{--mdc-icon-size:56px}
       .album-name{font-size:24px;font-weight:850}.album-artist{margin-top:5px;color:var(--secondary-text-color)}.album-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.album-actions button{height:42px;display:flex;align-items:center;gap:7px}
-      @media(max-width:600px){.now-shell,.browser-shell{min-height:560px}.hero{min-height:450px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}}
+      @media(max-width:600px){.now-shell,.browser-shell{min-height:560px}.hero{min-height:450px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:58px}}
     `;
   }
 
