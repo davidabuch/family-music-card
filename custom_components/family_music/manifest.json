@@ -1,0 +1,16 @@
+{
+  "domain": "family_music",
+  "name": "Family Music",
+  "codeowners": [
+    "@davidabuch"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "music_assistant"
+  ],
+  "documentation": "https://github.com/davidabuch/family-music-card",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "version": "0.1.0"
+}
