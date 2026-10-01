@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.1.7";
+const CARD_VERSION = "0.1.8";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -20,6 +20,7 @@ class FamilyMusicCard extends HTMLElement {
     this._albumReturnView = "search";
     this._busy = false;
     this._refreshTimer = null;
+    this._refreshTick = 0;
     this._refreshInFlight = false;
   }
 
@@ -57,9 +58,13 @@ class FamilyMusicCard extends HTMLElement {
   connectedCallback() {
     if (!this._refreshTimer) {
       this._refreshTimer = setInterval(() => {
-        if (this._view === "favorites") this._loadFavorites(false);
-        else if (this._view === "recents") this._loadRecents(false);
-      }, 10000);
+        this._refreshTick += 1;
+        if (this._view === "now") this._updateNowPlaying();
+        if (this._refreshTick % 3 === 0) {
+          if (this._view === "favorites") this._loadFavorites(false);
+          else if (this._view === "recents") this._loadRecents(false);
+        }
+      }, 1000);
     }
   }
 
@@ -302,8 +307,13 @@ class FamilyMusicCard extends HTMLElement {
               <button id="next" class="transport-button"><ha-icon icon="mdi:skip-next"></ha-icon></button>
             </div>
             <div class="volume-row">
-              <ha-icon icon="mdi:volume-high"></ha-icon>
-              <input id="volume" class="volume" type="range" min="0" max="100" value="20">
+              <button id="volumeDown" class="volume-step" title="Volume down" aria-label="Volume down">
+                <ha-icon icon="mdi:chevron-left"></ha-icon>
+              </button>
+              <input id="volume" class="volume" type="range" min="0" max="100" step="1" value="20">
+              <button id="volumeUp" class="volume-step" title="Volume up" aria-label="Volume up">
+                <ha-icon icon="mdi:chevron-right"></ha-icon>
+              </button>
             </div>
           </div>
         </div>
@@ -542,6 +552,17 @@ class FamilyMusicCard extends HTMLElement {
     `;
   }
 
+  _setVolume(percent) {
+    if (!this._selectedPlayer) return;
+    const bounded = Math.max(0, Math.min(100, Math.round(percent)));
+    const slider = this.shadowRoot.getElementById("volume");
+    if (slider) slider.value = bounded;
+    this._hass.callService("media_player", "volume_set", {
+      entity_id: this._selectedPlayer,
+      volume_level: bounded / 100,
+    });
+  }
+
   _wire() {
     const playerSelect = this.shadowRoot.getElementById("playerSelect");
     playerSelect?.addEventListener("change", (event) => {
@@ -579,13 +600,16 @@ class FamilyMusicCard extends HTMLElement {
         });
       }
     });
-    this.shadowRoot.getElementById("volume")?.addEventListener("change", (event) => {
-      if (this._selectedPlayer) {
-        this._hass.callService("media_player", "volume_set", {
-          entity_id: this._selectedPlayer,
-          volume_level: Number(event.target.value) / 100,
-        });
-      }
+    this.shadowRoot.getElementById("volume")?.addEventListener("input", (event) => {
+      this._setVolume(Number(event.target.value));
+    });
+    this.shadowRoot.getElementById("volumeDown")?.addEventListener("click", () => {
+      const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
+      this._setVolume(current - 5);
+    });
+    this.shadowRoot.getElementById("volumeUp")?.addEventListener("click", () => {
+      const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
+      this._setVolume(current + 5);
     });
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
@@ -743,7 +767,7 @@ class FamilyMusicCard extends HTMLElement {
       .controls-card{position:absolute;left:16px;right:16px;bottom:16px;padding:14px;border-radius:18px;background:rgba(255,255,255,.9);color:#333;backdrop-filter:blur(14px);z-index:2}
       .transport{display:flex;align-items:center;justify-content:center;gap:18px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
       .transport-button{width:46px;height:46px;background:transparent;color:#444}.play-button{width:64px;height:64px;background:#666;color:#fff}.play-button ha-icon{--mdc-icon-size:34px}.transport-button ha-icon{--mdc-icon-size:29px}
-      .volume-row{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:center;margin-top:10px}.volume{width:100%}
+      .volume-row{display:grid;grid-template-columns:42px minmax(0,1fr) 42px;gap:8px;align-items:center;margin-top:10px}.volume{width:100%}.volume-step{width:42px;height:42px;border-radius:50%;border:1px solid rgba(0,0,0,.12);background:rgba(255,255,255,.62);color:#444;display:flex;align-items:center;justify-content:center;cursor:pointer}.volume-step ha-icon{--mdc-icon-size:27px}
       .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
       .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}

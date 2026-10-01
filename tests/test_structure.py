@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.7"
+    assert manifest["version"] == "0.1.8"
     assert card_path.exists()
 
 
@@ -41,7 +41,7 @@ def test_recents_are_not_user_initiated_only_and_views_refresh():
     assert "fully_played_only=False" in recents_block
     assert 'this._view === "favorites"' in card_text
     assert "setInterval" in card_text
-    assert "10000" in card_text
+    assert "1000" in card_text
     assert 'id="refreshView"' in card_text
 
 
@@ -71,3 +71,16 @@ def test_native_sonos_browse_supports_browsemedia_objects():
     assert 'getattr(node, key, default)' in init_text
     assert '_browse_value(child, "title")' in init_text
     assert '_browse_value(child, "thumbnail")' in init_text
+
+
+def test_fast_refresh_and_volume_step_controls():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "}, 1000);" in card_text
+    assert "this._refreshTick % 3 === 0" in card_text
+    assert 'id="volumeDown"' in card_text
+    assert 'id="volumeUp"' in card_text
+    assert "current - 5" in card_text
+    assert "current + 5" in card_text
+    assert 'addEventListener("input"' in card_text
