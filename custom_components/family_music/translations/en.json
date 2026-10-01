@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Family Music",
+        "description": "Add the Family Music browser and controller to Home Assistant."
+      }
+    },
+    "abort": {
+      "already_configured": "Family Music is already configured."
+    }
+  }
+}
