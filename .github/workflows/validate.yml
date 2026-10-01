@@ -10,14 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Hassfest
+        uses: home-assistant/actions/hassfest@master
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
       - name: Install Ruff
         run: pip install ruff
+
       - name: Ruff
         run: ruff check custom_components tests
+
       - name: Compile Python
         run: python -m compileall -q custom_components
+
       - name: Check card syntax
         run: node --check custom_components/family_music/www/family-music-card.js
