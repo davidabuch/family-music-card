@@ -14,3 +14,7 @@ This repository is the durable source of truth for the Family Music controller.
 - No Music Assistant access token stored in Lovelace configuration.
 
 Development follows the HomeKit Integrations autonomous GitHub + Home Assistant engineering workflow.
+
+## Installation status
+
+The project is packaged as a HACS custom repository integration. Release installation and Home Assistant commissioning are performed only after Hassfest, HACS validation, lint, Python compilation, and card syntax checks are green.
