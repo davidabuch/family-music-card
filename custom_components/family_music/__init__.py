@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -11,6 +12,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.music_assistant.helpers import get_music_assistant_client
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import CARD_PATH, CARD_URL, DOMAIN, VERSION
 
@@ -83,6 +85,142 @@ def _normalize_search(result: dict[str, Any]) -> dict[str, list[dict[str, Any]]]
         key: [_mapping(item) for item in result.get(key, []) if isinstance(item, dict)]
         for key in ("artists", "albums", "tracks", "playlists", "radio")
     }
+
+
+def _name_tokens(name: str) -> set[str]:
+    """Return normalized significant title tokens."""
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", name.casefold())
+        if len(token) > 1
+    }
+
+
+def _browse_node(response: Any, entity_id: str) -> dict[str, Any]:
+    """Extract one media browser node from a Home Assistant service response."""
+    if not isinstance(response, dict):
+        return {}
+    node = response.get(entity_id)
+    return node if isinstance(node, dict) else {}
+
+
+async def _native_sonos_favorites(hass: HomeAssistant) -> list[dict[str, Any]]:
+    """Read household Sonos Favorites through Home Assistant's native Sonos browser."""
+    registry = er.async_get(hass)
+    candidates = [
+        entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player"
+        and entry.platform == "sonos"
+        and hass.states.get(entry.entity_id) is not None
+    ]
+    if not candidates:
+        return []
+
+    entity_id = sorted(candidates)[0]
+    folders = (
+        ("album", "object.container.album.musicAlbum"),
+        ("playlist", "object.container.playlistContainer"),
+        ("radio", "object.item.audioItem.audioBroadcast"),
+    )
+    favorites: list[dict[str, Any]] = []
+    for media_type, folder_id in folders:
+        response = await hass.services.async_call(
+            "media_player",
+            "browse_media",
+            {
+                "entity_id": entity_id,
+                "media_content_type": "favorites_folder",
+                "media_content_id": folder_id,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        node = _browse_node(response, entity_id)
+        children = node.get("children")
+        if not isinstance(children, list):
+            continue
+        for child in children:
+            if not isinstance(child, dict) or not child.get("can_play"):
+                continue
+            title = child.get("title")
+            content_id = child.get("media_content_id")
+            if not isinstance(title, str) or not isinstance(content_id, str):
+                continue
+            favorites.append(
+                {
+                    "name": title,
+                    "media_type": media_type,
+                    "image": child.get("thumbnail"),
+                    "sonos_content_id": content_id,
+                    "sonos_favorite": True,
+                }
+            )
+    return favorites
+
+
+def _best_existing_favorite(
+    sonos_item: dict[str, Any], candidates: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """Match a Sonos Favorite to an existing MA favorite."""
+    wanted_name = str(sonos_item.get("name") or "").casefold().strip()
+    wanted_tokens = _name_tokens(str(sonos_item.get("name") or ""))
+    for candidate in candidates:
+        name = str(candidate.get("name") or "")
+        if name.casefold().strip() == wanted_name:
+            return candidate
+    if wanted_tokens:
+        for candidate in candidates:
+            candidate_tokens = _name_tokens(str(candidate.get("name") or ""))
+            if wanted_tokens <= candidate_tokens:
+                return candidate
+    return None
+
+
+async def _resolve_sonos_favorite(
+    mass,
+    sonos_item: dict[str, Any],
+    existing: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Resolve a Sonos Favorite to a Music Assistant playable item."""
+    if match := _best_existing_favorite(sonos_item, existing):
+        return {**match, "sonos_favorite": True}
+
+    media_type = str(sonos_item["media_type"])
+    key = "radio" if media_type == "radio" else f"{media_type}s"
+    result = await mass.send_command(
+        "music/search",
+        search_query=sonos_item["name"],
+        media_types=[media_type],
+        limit=25,
+    )
+    candidates = [
+        item for item in result.get(key, []) if isinstance(item, dict)
+    ]
+    wanted = str(sonos_item["name"]).casefold().strip()
+    exact = [
+        item
+        for item in candidates
+        if str(item.get("name") or "").casefold().strip() == wanted
+    ]
+    if not exact:
+        return None
+
+    image = str(sonos_item.get("image") or "")
+    if "mzstatic.com" in image:
+        exact.sort(
+            key=lambda item: not str(item.get("uri") or "").startswith("apple_music")
+        )
+    elif "scdn.co" in image:
+        exact.sort(
+            key=lambda item: not str(item.get("uri") or "").startswith("spotify")
+        )
+
+    mapped = _mapping(exact[0])
+    mapped["sonos_favorite"] = True
+    if sonos_item.get("image") and not mapped.get("image"):
+        mapped["image"] = sonos_item["image"]
+    return mapped
 
 
 def _has_exact_apple_artist(result: dict[str, Any], query: str) -> bool:
@@ -225,7 +363,7 @@ async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_favorites(hass: HomeAssistant, connection, msg: dict) -> None:
-    """Return Music Assistant favorites grouped by supported media type."""
+    """Return the union of Music Assistant favorites and household Sonos Favorites."""
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     commands = {
         "artists": "music/artists/library_items",
@@ -245,6 +383,20 @@ async def ws_favorites(hass: HomeAssistant, connection, msg: dict) -> None:
             summary=False,
         )
         favorites[key] = [_mapping(item) for item in items if isinstance(item, dict)]
+
+    sonos_favorites = await _native_sonos_favorites(hass)
+    for sonos_item in sonos_favorites:
+        media_type = str(sonos_item["media_type"])
+        key = "radio" if media_type == "radio" else f"{media_type}s"
+        existing = favorites.setdefault(key, [])
+        resolved = await _resolve_sonos_favorite(mass, sonos_item, existing)
+        if not resolved:
+            continue
+        resolved_uri = resolved.get("uri")
+        if resolved_uri and any(item.get("uri") == resolved_uri for item in existing):
+            continue
+        existing.append(resolved)
+
     connection.send_result(msg["id"], favorites)
 
 
