@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.4"
+    assert manifest["version"] == "0.1.5"
     assert card_path.exists()
 
 
@@ -43,3 +43,14 @@ def test_recents_are_not_user_initiated_only_and_views_refresh():
     assert "setInterval" in card_text
     assert "10000" in card_text
     assert 'id="refreshView"' in card_text
+
+
+def test_recents_fall_back_to_live_queue_history():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    recents_block = init_text.split('"family_music/recents"', 1)[1].split(
+        '"family_music/favorites"', 1
+    )[0]
+    assert '"player_queues/get"' in recents_block
+    assert '"player_queues/items"' in recents_block
+    assert "current_index" in recents_block
+    assert "reversed(played_queue_items)" in recents_block
