@@ -96,12 +96,18 @@ def _name_tokens(name: str) -> set[str]:
     }
 
 
-def _browse_node(response: Any, entity_id: str) -> dict[str, Any]:
+def _browse_node(response: Any, entity_id: str) -> Any:
     """Extract one media browser node from a Home Assistant service response."""
     if not isinstance(response, dict):
-        return {}
-    node = response.get(entity_id)
-    return node if isinstance(node, dict) else {}
+        return None
+    return response.get(entity_id)
+
+
+def _browse_value(node: Any, key: str, default: Any = None) -> Any:
+    """Read a field from either a BrowseMedia object or serialized dictionary."""
+    if isinstance(node, dict):
+        return node.get(key, default)
+    return getattr(node, key, default)
 
 
 async def _native_sonos_favorites(hass: HomeAssistant) -> list[dict[str, Any]]:
@@ -137,21 +143,21 @@ async def _native_sonos_favorites(hass: HomeAssistant) -> list[dict[str, Any]]:
             return_response=True,
         )
         node = _browse_node(response, entity_id)
-        children = node.get("children")
+        children = _browse_value(node, "children", [])
         if not isinstance(children, list):
             continue
         for child in children:
-            if not isinstance(child, dict) or not child.get("can_play"):
+            if not _browse_value(child, "can_play", False):
                 continue
-            title = child.get("title")
-            content_id = child.get("media_content_id")
+            title = _browse_value(child, "title")
+            content_id = _browse_value(child, "media_content_id")
             if not isinstance(title, str) or not isinstance(content_id, str):
                 continue
             favorites.append(
                 {
                     "name": title,
                     "media_type": media_type,
-                    "image": child.get("thumbnail"),
+                    "image": _browse_value(child, "thumbnail"),
                     "sonos_content_id": content_id,
                     "sonos_favorite": True,
                 }
