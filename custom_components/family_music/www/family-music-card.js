@@ -380,6 +380,40 @@ class FamilyMusicCard extends HTMLElement {
       `;
     }
 
+    if (this._view === "recents") {
+      if (this._recents[0]?.error) {
+        return `<div class="status error">${this._escape(this._recents[0].error)}</div>`;
+      }
+      if (!this._queueId()) {
+        return '<div class="status">No Music Assistant queue is available for this zone yet.</div>';
+      }
+      return this._recents.length
+        ? this._section("Recently Played", this._recents.map((item) => this._recentRow(item)).join(""), "recent-list")
+        : '<div class="status">Nothing has been played recently in this zone.</div>';
+    }
+
+    if (this._view === "favorites") {
+      if (this._favorites?.error) {
+        return `<div class="status error">${this._escape(this._favorites.error)}</div>`;
+      }
+      if (!this._favorites) {
+        return '<div class="status">Loading favorites…</div>';
+      }
+      const artists = this._favorites.artists || [];
+      const albums = this._favorites.albums || [];
+      const tracks = this._favorites.tracks || [];
+      const playlists = this._favorites.playlists || [];
+      const radio = this._favorites.radio || [];
+      const markup = [
+        this._section("Artists", artists.map((item) => this._artistTile(item)).join("")),
+        this._section("Albums", albums.map((item) => this._albumTile(item)).join("")),
+        this._section("Tracks", tracks.map((item, index) => this._trackRow(item, index + 1)).join(""), "track-list"),
+        this._section("Playlists", playlists.map((item) => this._albumTile(item)).join("")),
+        this._section("Radio", radio.map((item) => this._albumTile(item)).join("")),
+      ].join("");
+      return markup || '<div class="status">No favorites found in Music Assistant.</div>';
+    }
+
     if (!this._searchResults) {
       return '<div class="status">Search for an artist, album, song, playlist or station.</div>';
     }
@@ -430,6 +464,23 @@ class FamilyMusicCard extends HTMLElement {
         </div>
         <div class="tile-title">${this._escape(item.name)}</div>
         <div class="tile-subtitle">${this._escape(this._artistName(item) || item.version || "")}</div>
+      </button>
+    `;
+  }
+
+  _recentRow(item) {
+    const subtitle = [this._artistName(item), item.album?.name].filter(Boolean).join(" · ");
+    const typeLabel = String(item.media_type || "music")
+      .replaceAll("_", " ")
+      .replace(/^./, (value) => value.toUpperCase());
+    return `
+      <button class="recent-row recent-item" data-uri="${this._escape(item.uri)}">
+        <div class="recent-thumb">${item.image ? `<img src="${this._escape(item.image)}">` : '<ha-icon icon="mdi:music"></ha-icon>'}</div>
+        <div class="recent-copy">
+          <div class="recent-title">${this._escape(item.name)}</div>
+          <div class="recent-subtitle">${this._escape(subtitle || this._providerLabel(item.uri))}</div>
+        </div>
+        <span class="recent-type">${this._escape(typeLabel)}</span>
       </button>
     `;
   }
