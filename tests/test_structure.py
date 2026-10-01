@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.6"
+    assert manifest["version"] == "0.1.7"
     assert card_path.exists()
 
 
@@ -63,3 +63,11 @@ def test_favorites_include_native_sonos_browser():
     assert '"object.container.playlistContainer"' in init_text
     assert '"object.item.audioItem.audioBroadcast"' in init_text
     assert "sonos_favorite" in init_text
+
+
+def test_native_sonos_browse_supports_browsemedia_objects():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    assert "def _browse_value" in init_text
+    assert 'getattr(node, key, default)' in init_text
+    assert '_browse_value(child, "title")' in init_text
+    assert '_browse_value(child, "thumbnail")' in init_text
