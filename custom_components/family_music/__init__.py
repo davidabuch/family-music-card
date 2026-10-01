@@ -166,13 +166,12 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
 )
 @websocket_api.async_response
 async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
-    """Return user-initiated recently played items for one Music Assistant queue."""
+    """Return recently played items for one Music Assistant queue."""
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     result = await mass.send_command(
         "music/recently_played_items",
         limit=msg["limit"],
         queue_id=msg["queue_id"],
-        user_initiated_only=True,
     )
     connection.send_result(
         msg["id"], [_mapping(item) for item in result if isinstance(item, dict)]
