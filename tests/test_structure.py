@@ -41,7 +41,7 @@ def test_recents_are_not_user_initiated_only_and_views_refresh():
     assert "fully_played_only=False" in recents_block
     assert 'this._view === "favorites"' in card_text
     assert "setInterval" in card_text
-    assert "10000" in card_text
+    assert "1000" in card_text
     assert 'id="refreshView"' in card_text
 
 
