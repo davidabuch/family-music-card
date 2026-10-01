@@ -19,6 +19,8 @@ class FamilyMusicCard extends HTMLElement {
     this._artistReturnView = "search";
     this._albumReturnView = "search";
     this._busy = false;
+    this._refreshTimer = null;
+    this._refreshInFlight = false;
   }
 
   setConfig(config) {
@@ -51,6 +53,23 @@ class FamilyMusicCard extends HTMLElement {
   get hass() {
     return this._hass;
   }
+
+  connectedCallback() {
+    if (!this._refreshTimer) {
+      this._refreshTimer = setInterval(() => {
+        if (this._view === "favorites") this._loadFavorites(false);
+        else if (this._view === "recents") this._loadRecents(false);
+      }, 10000);
+    }
+  }
+
+  disconnectedCallback() {
+    if (this._refreshTimer) {
+      clearInterval(this._refreshTimer);
+      this._refreshTimer = null;
+    }
+  }
+
 
   _escape(value) {
     return String(value ?? "")
@@ -184,14 +203,24 @@ class FamilyMusicCard extends HTMLElement {
 
   async _openRecents() {
     this._view = "recents";
-    this._busy = true;
     this._recents = [];
     this._render();
+    await this._loadRecents(true);
+  }
+
+  async _loadRecents(showBusy = false) {
+    if (this._refreshInFlight) return;
     const queueId = this._queueId();
     if (!queueId) {
+      this._recents = [];
       this._busy = false;
       this._render();
       return;
+    }
+    this._refreshInFlight = true;
+    if (showBusy) {
+      this._busy = true;
+      this._renderBrowserBody();
     }
     try {
       const items = await this._ws("family_music/recents", {
@@ -202,22 +231,33 @@ class FamilyMusicCard extends HTMLElement {
     } catch (error) {
       this._recents = [{ error: error?.message || String(error) }];
     } finally {
+      this._refreshInFlight = false;
       this._busy = false;
-      this._render();
+      if (this._view === "recents") this._renderBrowserBody();
     }
   }
 
   async _openFavorites() {
     this._view = "favorites";
-    this._busy = true;
     this._render();
+    await this._loadFavorites(true);
+  }
+
+  async _loadFavorites(showBusy = false) {
+    if (this._refreshInFlight) return;
+    this._refreshInFlight = true;
+    if (showBusy) {
+      this._busy = true;
+      this._renderBrowserBody();
+    }
     try {
       this._favorites = await this._ws("family_music/favorites", { limit: 40 });
     } catch (error) {
       this._favorites = { error: error?.message || String(error) };
     } finally {
+      this._refreshInFlight = false;
       this._busy = false;
-      this._render();
+      if (this._view === "favorites") this._renderBrowserBody();
     }
   }
 
@@ -291,7 +331,10 @@ class FamilyMusicCard extends HTMLElement {
         <div class="browser-header">
           <button id="browserBack" class="circle-button"><ha-icon icon="mdi:arrow-left"></ha-icon></button>
           <div class="browser-title">${this._escape(title)}</div>
-          <button id="browserClose" class="circle-button"><ha-icon icon="mdi:close"></ha-icon></button>
+          <div class="header-actions">
+            ${["favorites", "recents"].includes(this._view) ? '<button id="refreshView" class="circle-button" title="Refresh"><ha-icon icon="mdi:refresh"></ha-icon></button>' : ""}
+            <button id="browserClose" class="circle-button"><ha-icon icon="mdi:close"></ha-icon></button>
+          </div>
         </div>
         ${this._view === "search" ? this._renderSearchControls() : ""}
         <div id="browserBody" class="browser-body">${this._renderBrowserBodyMarkup()}</div>
@@ -546,6 +589,10 @@ class FamilyMusicCard extends HTMLElement {
     });
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
+    this.shadowRoot.getElementById("refreshView")?.addEventListener("click", () => {
+      if (this._view === "favorites") this._loadFavorites(true);
+      else if (this._view === "recents") this._loadRecents(true);
+    });
     this.shadowRoot.getElementById("browserBack")?.addEventListener("click", () => {
       if (this._view === "album") this._setView(this._albumReturnView || "search");
       else if (this._view === "artist") this._setView(this._artistReturnView || "search");
@@ -699,7 +746,7 @@ class FamilyMusicCard extends HTMLElement {
       .volume-row{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px;align-items:center;margin-top:10px}.volume{width:100%}
       .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
       .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
-      .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}
+      .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
       .browser-title{font-size:23px;font-weight:800;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.provider-row{display:flex;gap:8px;flex-wrap:wrap;padding:14px 14px 0}
       .provider-chip{border:1px solid var(--divider-color);border-radius:999px;padding:9px 13px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-weight:700;cursor:pointer}
       .provider-chip.active{background:var(--primary-color);border-color:var(--primary-color);color:#fff}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:12px 14px}
