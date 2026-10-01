@@ -267,21 +267,24 @@ class FamilyMusicCard extends HTMLElement {
             </div>
           </div>
         </div>
-        <div class="nav-strip">
-          <button class="nav-button active"><ha-icon icon="mdi:home"></ha-icon></button>
-          <button id="navSearch" class="nav-button"><ha-icon icon="mdi:magnify"></ha-icon></button>
-        </div>
+        ${this._renderNavStrip("now")}
       </div>
     `;
   }
 
   _renderBrowserView() {
+    const playerName =
+      this._hass?.states?.[this._selectedPlayer]?.attributes?.friendly_name || "this zone";
     const title =
       this._view === "artist"
         ? this._selectedArtist?.name || "Artist"
         : this._view === "album"
           ? this._selectedAlbum?.name || "Album"
-          : "Choose Music";
+          : this._view === "recents"
+            ? `Recent · ${playerName}`
+            : this._view === "favorites"
+              ? "Favorites"
+              : "Choose Music";
 
     return `
       <div class="browser-shell">
@@ -292,6 +295,27 @@ class FamilyMusicCard extends HTMLElement {
         </div>
         ${this._view === "search" ? this._renderSearchControls() : ""}
         <div id="browserBody" class="browser-body">${this._renderBrowserBodyMarkup()}</div>
+        ${this._renderNavStrip(this._view)}
+      </div>
+    `;
+  }
+
+  _renderNavStrip(activeView = this._view) {
+    const active = ["artist", "album"].includes(activeView) ? "" : activeView;
+    return `
+      <div class="nav-strip">
+        <button id="navNow" class="nav-button ${active === "now" ? "active" : ""}" title="Now Playing">
+          <ha-icon icon="mdi:home"></ha-icon><span>Now</span>
+        </button>
+        <button id="navRecents" class="nav-button ${active === "recents" ? "active" : ""}" title="Recent for this zone">
+          <ha-icon icon="mdi:history"></ha-icon><span>Recents</span>
+        </button>
+        <button id="navFavorites" class="nav-button ${active === "favorites" ? "active" : ""}" title="Favorites">
+          <ha-icon icon="mdi:heart"></ha-icon><span>Favorites</span>
+        </button>
+        <button id="navSearch" class="nav-button ${active === "search" ? "active" : ""}" title="Search">
+          <ha-icon icon="mdi:magnify"></ha-icon><span>Search</span>
+        </button>
       </div>
     `;
   }
