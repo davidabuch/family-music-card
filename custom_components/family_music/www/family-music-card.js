@@ -514,6 +514,9 @@ class FamilyMusicCard extends HTMLElement {
     };
     this.shadowRoot.getElementById("openSearch")?.addEventListener("click", openSearch);
     this.shadowRoot.getElementById("navSearch")?.addEventListener("click", openSearch);
+    this.shadowRoot.getElementById("navNow")?.addEventListener("click", () => this._setView("now"));
+    this.shadowRoot.getElementById("navRecents")?.addEventListener("click", () => this._openRecents());
+    this.shadowRoot.getElementById("navFavorites")?.addEventListener("click", () => this._openFavorites());
 
     this.shadowRoot.getElementById("prev")?.addEventListener("click", () => {
       if (this._selectedPlayer) {
@@ -544,8 +547,8 @@ class FamilyMusicCard extends HTMLElement {
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
     this.shadowRoot.getElementById("browserBack")?.addEventListener("click", () => {
-      if (this._view === "album") this._setView("artist");
-      else if (this._view === "artist") this._setView("search");
+      if (this._view === "album") this._setView(this._albumReturnView || "search");
+      else if (this._view === "artist") this._setView(this._artistReturnView || "search");
       else this._setView("now");
     });
 
@@ -576,7 +579,11 @@ class FamilyMusicCard extends HTMLElement {
 
     body.querySelectorAll(".artist-item").forEach((element) => {
       element.addEventListener("click", () => {
-        const item = (this._searchResults?.artists || []).find((candidate) => candidate.uri === element.dataset.uri);
+        const artists = [
+          ...(this._searchResults?.artists || []),
+          ...(this._favorites?.artists || []),
+        ];
+        const item = artists.find((candidate) => candidate.uri === element.dataset.uri);
         if (item) this._openArtist(item);
       });
     });
@@ -588,6 +595,9 @@ class FamilyMusicCard extends HTMLElement {
           ...(this._searchResults?.albums || []),
           ...(this._searchResults?.playlists || []),
           ...(this._searchResults?.radio || []),
+          ...(this._favorites?.albums || []),
+          ...(this._favorites?.playlists || []),
+          ...(this._favorites?.radio || []),
         ];
         const item = collections.find((candidate) => candidate.uri === element.dataset.uri);
         if (!item) return;
@@ -598,9 +608,23 @@ class FamilyMusicCard extends HTMLElement {
 
     body.querySelectorAll(".track-item").forEach((element) => {
       element.addEventListener("click", () => {
-        const collections = [...this._albumTracks, ...(this._searchResults?.tracks || [])];
+        const collections = [
+          ...this._albumTracks,
+          ...(this._searchResults?.tracks || []),
+          ...(this._favorites?.tracks || []),
+        ];
         const item = collections.find((candidate) => candidate.uri === element.dataset.uri);
         if (item) this._play(item);
+      });
+    });
+
+    body.querySelectorAll(".recent-item").forEach((element) => {
+      element.addEventListener("click", () => {
+        const item = this._recents.find((candidate) => candidate.uri === element.dataset.uri);
+        if (!item) return;
+        if (item.media_type === "artist") this._openArtist(item);
+        else if (item.media_type === "album") this._openAlbum(item);
+        else this._play(item);
       });
     });
   }
