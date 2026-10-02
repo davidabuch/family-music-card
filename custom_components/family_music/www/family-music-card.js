@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.1";
+const CARD_VERSION = "0.3.2";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -884,7 +884,7 @@ class FamilyMusicCard extends HTMLElement {
     const bounded = Math.max(0, Math.min(100, Math.round(percent)));
     this._optimisticVolumes.set(entityId, {
       value: bounded,
-      until: Date.now() + 1800,
+      until: Date.now() + 5000,
     });
     return bounded;
   }
@@ -927,7 +927,11 @@ class FamilyMusicCard extends HTMLElement {
   _optimisticVolume(entityId, actualPercent) {
     const pending = this._optimisticVolumes.get(entityId);
     if (!pending) return actualPercent;
-    if (Date.now() >= pending.until || Math.abs(actualPercent - pending.value) <= 1) {
+    if (actualPercent === pending.value) {
+      this._optimisticVolumes.delete(entityId);
+      return actualPercent;
+    }
+    if (Date.now() >= pending.until) {
       this._optimisticVolumes.delete(entityId);
       return actualPercent;
     }
