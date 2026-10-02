@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.1.9"
+    assert manifest["version"] == "0.2.0"
     assert card_path.exists()
 
 
@@ -99,3 +99,13 @@ def test_track_progress_and_mute_controls():
     assert '"volume_mute"' in card_text
     assert "is_volume_muted" in card_text
     assert '"mdi:volume-off"' in card_text
+
+
+def test_refined_progress_and_compact_volume_controls():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="trackProgress" class="track-progress" type="range"' in card_text
+    assert "--progress-pct" in card_text
+    assert 'class="volume-nudge"' in card_text
+    assert "grid-template-columns:34px 24px minmax(0,1fr) 24px" in card_text
