@@ -253,4 +253,5 @@ def test_now_playing_uses_music_search_icon():
     assert 'id="musicSearchGradient"' in card_text
     assert 'class="music-search-note"' in card_text
     assert 'class="music-search-capsule"' in card_text
-    assert 'icon="mdi:magnify"' not in card_text.split('id="openSearch"', 1)[1].split('</button>', 1)[0]
+    search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
+    assert 'icon="mdi:magnify"' not in search_button
