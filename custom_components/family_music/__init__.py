@@ -302,6 +302,91 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "family_music/group_members",
+        vol.Required("config_entry_id"): str,
+        vol.Required("player_entity_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Return Home Assistant media_player entities for one Music Assistant group."""
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    registry = er.async_get(hass)
+    group_entry = registry.async_get(msg["player_entity_id"])
+    group_player_id = (
+        group_entry.unique_id
+        if group_entry is not None
+        and group_entry.domain == "media_player"
+        and group_entry.platform == "music_assistant"
+        else None
+    )
+    if not group_player_id:
+        connection.send_result(msg["id"], [])
+        return
+
+    players = await mass.send_command("players/all")
+    if not isinstance(players, list):
+        connection.send_result(msg["id"], [])
+        return
+
+    group = next(
+        (
+            player
+            for player in players
+            if isinstance(player, dict) and player.get("player_id") == group_player_id
+        ),
+        None,
+    )
+    if not isinstance(group, dict):
+        connection.send_result(msg["id"], [])
+        return
+
+    member_ids = group.get("group_members")
+    if not isinstance(member_ids, list):
+        connection.send_result(msg["id"], [])
+        return
+
+    entity_by_unique_id = {
+        entry.unique_id: entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player" and entry.platform == "music_assistant"
+    }
+    player_by_id = {
+        player.get("player_id"): player
+        for player in players
+        if isinstance(player, dict) and isinstance(player.get("player_id"), str)
+    }
+
+    members: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for player_id in member_ids:
+        if not isinstance(player_id, str) or player_id == group_player_id or player_id in seen:
+            continue
+        seen.add(player_id)
+        entity_id = entity_by_unique_id.get(player_id)
+        if not entity_id:
+            continue
+        state = hass.states.get(entity_id)
+        player = player_by_id.get(player_id, {})
+        friendly_name = (
+            state.attributes.get("friendly_name")
+            if state is not None
+            else None
+        ) or player.get("name") or entity_id
+        members.append(
+            {
+                "entity_id": entity_id,
+                "player_id": player_id,
+                "name": friendly_name,
+                "available": state is not None and state.state != "unavailable",
+            }
+        )
+
+    connection.send_result(msg["id"], members)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "family_music/recents",
         vol.Required("config_entry_id"): str,
         vol.Required("queue_id"): str,
@@ -459,6 +544,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         frontend.add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
         websocket_api.async_register_command(hass, ws_search)
+        websocket_api.async_register_command(hass, ws_group_members)
         websocket_api.async_register_command(hass, ws_recents)
         websocket_api.async_register_command(hass, ws_favorites)
         websocket_api.async_register_command(hass, ws_artist_albums)
