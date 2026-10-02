@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.2"
+    assert manifest["version"] == "0.3.3"
     assert card_path.exists()
 
 
@@ -219,3 +219,25 @@ def test_optimistic_volume_waits_for_exact_acknowledgement():
     assert "actualPercent === pending.value" in card_text
     assert "Math.abs(actualPercent - pending.value) <= 1" not in card_text
     assert "Date.now() + 5000" in card_text
+
+
+
+def test_browser_navigation_is_even_four_column_grid():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "grid-template-columns:repeat(4,minmax(0,1fr))" in card_text
+    assert ".nav-button{min-width:0;width:100%" in card_text
+
+
+def test_voice_search_controls_and_feature_detection():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="voiceSearch"' in card_text
+    assert 'icon="mdi:microphone"' in card_text
+    assert "window.SpeechRecognition || window.webkitSpeechRecognition" in card_text
+    assert 'recognition.lang = "en-US"' in card_text
+    assert "recognition.onresult" in card_text
+    assert "setTimeout(() => this._search(), 0)" in card_text
+    assert "Dictation is not available on this device" in card_text

@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.2";
+const CARD_VERSION = "0.3.3";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -33,6 +33,8 @@ class FamilyMusicCard extends HTMLElement {
     this._volumeWrites = new Map();
     this._destinationOpen = false;
     this._moreOpen = false;
+    this._speechRecognition = null;
+    this._dictating = false;
   }
 
   setConfig(config) {
@@ -88,6 +90,15 @@ class FamilyMusicCard extends HTMLElement {
       if (pending.timer) clearTimeout(pending.timer);
     }
     this._volumeWrites.clear();
+    if (this._speechRecognition) {
+      try {
+        this._speechRecognition.stop();
+      } catch (_error) {
+        // Recognition may already be stopped.
+      }
+      this._speechRecognition = null;
+      this._dictating = false;
+    }
   }
 
 
@@ -687,6 +698,9 @@ class FamilyMusicCard extends HTMLElement {
       <div class="search-row">
         <input id="musicSearch" class="search-input" type="search"
           placeholder="Artist, album, song or playlist…" value="${this._escape(this._query)}">
+        <button id="voiceSearch" class="voice-search" type="button" title="Dictate search" aria-label="Dictate search">
+          <ha-icon icon="mdi:microphone"></ha-icon>
+        </button>
         <button id="searchGo" class="search-go">Search</button>
       </div>
     `;
@@ -1100,6 +1114,7 @@ class FamilyMusicCard extends HTMLElement {
     this.shadowRoot.getElementById("musicSearch")?.addEventListener("keydown", (event) => {
       if (event.key === "Enter") runSearch();
     });
+    this._wireVoiceSearch();
 
     this.shadowRoot.getElementById("playAlbum")?.addEventListener("click", () => this._playAlbum(false));
     this.shadowRoot.getElementById("shuffleAlbum")?.addEventListener("click", () => this._playAlbum(true));
@@ -1108,6 +1123,66 @@ class FamilyMusicCard extends HTMLElement {
     this._wireBrowserItems();
     this._wireNowOverlays();
     this._loadGroupMembers(false);
+  }
+
+  _wireVoiceSearch() {
+    const button = this.shadowRoot.getElementById("voiceSearch");
+    const input = this.shadowRoot.getElementById("musicSearch");
+    if (!button || !input) return;
+
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      button.disabled = true;
+      button.title = "Dictation is not available on this device";
+      button.setAttribute("aria-label", "Dictation unavailable");
+      return;
+    }
+
+    button.addEventListener("click", () => {
+      if (this._dictating && this._speechRecognition) {
+        this._speechRecognition.stop();
+        return;
+      }
+
+      const recognition = new Recognition();
+      this._speechRecognition = recognition;
+      recognition.lang = "en-US";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      const setListening = (listening) => {
+        this._dictating = listening;
+        button.classList.toggle("listening", listening);
+        button.innerHTML = `<ha-icon icon="${listening ? "mdi:microphone" : "mdi:microphone"}"></ha-icon>`;
+        button.title = listening ? "Listening…" : "Dictate search";
+        button.setAttribute("aria-label", listening ? "Stop dictation" : "Dictate search");
+      };
+
+      recognition.onstart = () => setListening(true);
+      recognition.onend = () => {
+        setListening(false);
+        if (this._speechRecognition === recognition) this._speechRecognition = null;
+      };
+      recognition.onerror = () => {
+        setListening(false);
+        if (this._speechRecognition === recognition) this._speechRecognition = null;
+      };
+      recognition.onresult = (event) => {
+        const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+        if (!transcript) return;
+        input.value = transcript;
+        this._query = transcript;
+        setTimeout(() => this._search(), 0);
+      };
+
+      try {
+        recognition.start();
+      } catch (_error) {
+        setListening(false);
+        this._speechRecognition = null;
+      }
+    });
   }
 
   _wireBrowserItems() {
@@ -1309,12 +1384,15 @@ class FamilyMusicCard extends HTMLElement {
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}.secondary-title{margin-top:20px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}
       .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}
+      .nav-strip{height:78px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto;padding:4px 8px 6px;gap:4px}
+      .nav-button{min-width:0;width:100%;height:64px;border:0;border-radius:14px;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:0}
+      .nav-button ha-icon{--mdc-icon-size:26px}.nav-button span{font-size:11px;font-weight:700;white-space:nowrap}.nav-button.active{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
       .browser-title{font-size:23px;font-weight:800;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.provider-row{display:flex;gap:8px;flex-wrap:wrap;padding:14px 14px 0}
       .provider-chip{border:1px solid var(--divider-color);border-radius:999px;padding:9px 13px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-weight:700;cursor:pointer}
-      .provider-chip.active{background:var(--primary-color);border-color:var(--primary-color);color:#fff}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:12px 14px}
-      .search-input{width:100%;padding:13px 15px;border-radius:14px;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color);font-size:16px}
-      .search-go,.primary-action,.secondary-action{border:0;border-radius:13px;padding:0 16px;font-weight:800;cursor:pointer}.search-go,.primary-action{background:var(--primary-color);color:#fff}.secondary-action{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}
+      .provider-chip.active{background:var(--primary-color);border-color:var(--primary-color);color:#fff}.search-row{display:grid;grid-template-columns:minmax(0,1fr) 48px auto;gap:9px;padding:12px 14px;align-items:center}
+      .search-input{width:100%;min-width:0;padding:13px 15px;border-radius:14px;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color);font-size:16px}
+      .voice-search{width:48px;height:48px;border:1px solid var(--divider-color);border-radius:50%;background:var(--secondary-background-color);color:var(--primary-text-color);display:flex;align-items:center;justify-content:center;cursor:pointer}.voice-search ha-icon{--mdc-icon-size:25px}.voice-search.listening{background:var(--primary-color);color:#fff;border-color:var(--primary-color);box-shadow:0 0 0 5px color-mix(in srgb,var(--primary-color) 18%,transparent)}.voice-search:disabled{opacity:.35;cursor:default}.search-go,.primary-action,.secondary-action{border:0;border-radius:13px;padding:0 16px;font-weight:800;cursor:pointer}.search-go,.primary-action{background:var(--primary-color);color:#fff}.secondary-action{background:var(--secondary-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color)}
       .browser-body{padding:2px 14px 20px;overflow:auto;flex:1}.status{padding:50px 10px;text-align:center;color:var(--secondary-text-color)}.status.error{color:var(--error-color)}
       .section{margin-bottom:24px}.section h3{font-size:20px;margin:10px 0 12px}.tile-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px}
       .media-tile{border:0;background:transparent;color:var(--primary-text-color);padding:0;text-align:left;cursor:pointer;min-width:0}.artwork{position:relative;aspect-ratio:1;border-radius:16px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}
@@ -1329,7 +1407,7 @@ class FamilyMusicCard extends HTMLElement {
       .album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
       .album-art{width:150px;height:150px;border-radius:18px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.album-art ha-icon{--mdc-icon-size:56px}
       .album-name{font-size:24px;font-weight:850}.album-artist{margin-top:5px;color:var(--secondary-text-color)}.album-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.album-actions button{height:42px;display:flex;align-items:center;gap:7px}
-      @media(max-width:600px){.now-shell,.browser-shell{min-height:560px}.hero,.now-content{min-height:650px}.now-content{padding:18px 18px 16px}.artwork-stage{width:min(84vw,390px);margin-bottom:18px}.track-title{font-size:25px}.track-meta{font-size:15px}.transport{margin-left:16px;margin-right:16px}.bottom-actions{grid-template-columns:54px minmax(0,1fr) 54px}.bottom-circle{width:54px;height:54px}.destination-pill{height:54px;font-size:16px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:58px}}
+      @media(max-width:600px){.search-row{grid-template-columns:minmax(0,1fr) 44px auto;gap:7px}.voice-search{width:44px;height:44px}.search-go{padding:0 13px}.nav-strip{padding-left:5px;padding-right:5px}.nav-button span{font-size:10px}.now-shell,.browser-shell{min-height:560px}.hero,.now-content{min-height:650px}.now-content{padding:18px 18px 16px}.artwork-stage{width:min(84vw,390px);margin-bottom:18px}.track-title{font-size:25px}.track-meta{font-size:15px}.transport{margin-left:16px;margin-right:16px}.bottom-actions{grid-template-columns:54px minmax(0,1fr) 54px}.bottom-circle{width:54px;height:54px}.destination-pill{height:54px;font-size:16px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:0}}
     `;
   }
 
