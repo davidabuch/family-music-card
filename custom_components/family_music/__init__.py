@@ -304,13 +304,26 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
     {
         vol.Required("type"): "family_music/group_members",
         vol.Required("config_entry_id"): str,
-        vol.Required("player_id"): str,
+        vol.Required("player_entity_id"): str,
     }
 )
 @websocket_api.async_response
 async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return Home Assistant media_player entities for one Music Assistant group."""
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    registry = er.async_get(hass)
+    group_entry = registry.async_get(msg["player_entity_id"])
+    group_player_id = (
+        group_entry.unique_id
+        if group_entry is not None
+        and group_entry.domain == "media_player"
+        and group_entry.platform == "music_assistant"
+        else None
+    )
+    if not group_player_id:
+        connection.send_result(msg["id"], [])
+        return
+
     players = await mass.send_command("players/all")
     if not isinstance(players, list):
         connection.send_result(msg["id"], [])
@@ -320,7 +333,7 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
         (
             player
             for player in players
-            if isinstance(player, dict) and player.get("player_id") == msg["player_id"]
+            if isinstance(player, dict) and player.get("player_id") == group_player_id
         ),
         None,
     )
@@ -333,7 +346,6 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
         connection.send_result(msg["id"], [])
         return
 
-    registry = er.async_get(hass)
     entity_by_unique_id = {
         entry.unique_id: entry.entity_id
         for entry in registry.entities.values()
@@ -348,7 +360,7 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
     members: list[dict[str, Any]] = []
     seen: set[str] = set()
     for player_id in member_ids:
-        if not isinstance(player_id, str) or player_id == msg["player_id"] or player_id in seen:
+        if not isinstance(player_id, str) or player_id == group_player_id or player_id in seen:
             continue
         seen.add(player_id)
         entity_id = entity_by_unique_id.get(player_id)
