@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.2.2";
+const CARD_VERSION = "0.2.3";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -27,6 +27,10 @@ class FamilyMusicCard extends HTMLElement {
     this._groupMembersFor = null;
     this._groupMembersLoading = false;
     this._membersExpanded = false;
+    this._optimisticPlayback = null;
+    this._optimisticPlaybackUntil = 0;
+    this._optimisticVolumes = new Map();
+    this._volumeWrites = new Map();
   }
 
   setConfig(config) {
@@ -78,6 +82,10 @@ class FamilyMusicCard extends HTMLElement {
       clearInterval(this._refreshTimer);
       this._refreshTimer = null;
     }
+    for (const pending of this._volumeWrites.values()) {
+      if (pending.timer) clearTimeout(pending.timer);
+    }
+    this._volumeWrites.clear();
   }
 
 
@@ -204,19 +212,19 @@ class FamilyMusicCard extends HTMLElement {
     });
     this.shadowRoot.querySelectorAll(".member-volume").forEach((slider) => {
       slider.addEventListener("input", (event) => {
+        const entityId = event.target.dataset.entity;
+        if (!entityId) return;
         const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
         const row = event.target.closest(".member-volume-row");
         const display = row?.querySelector(".member-volume-value");
         if (display) display.textContent = `${Math.round(value)}%`;
+        this._queueVolumeWrite(entityId, value, false);
       });
-      slider.addEventListener("change", async (event) => {
+      slider.addEventListener("change", (event) => {
         const entityId = event.target.dataset.entity;
         if (!entityId) return;
         const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
-        await this._hass.callService("media_player", "volume_set", {
-          entity_id: entityId,
-          volume_level: value / 100,
-        });
+        this._queueVolumeWrite(entityId, value, true);
       });
     });
   }
@@ -696,15 +704,66 @@ class FamilyMusicCard extends HTMLElement {
     return Math.max(0, position);
   }
 
-  _setVolume(percent) {
-    if (!this._selectedPlayer) return;
+  _setOptimisticVolume(entityId, percent) {
     const bounded = Math.max(0, Math.min(100, Math.round(percent)));
+    this._optimisticVolumes.set(entityId, {
+      value: bounded,
+      until: Date.now() + 1800,
+    });
+    return bounded;
+  }
+
+  _queueVolumeWrite(entityId, percent, flush = false) {
+    if (!entityId || !this._hass) return;
+    const bounded = this._setOptimisticVolume(entityId, percent);
+    let pending = this._volumeWrites.get(entityId);
+    if (!pending) {
+      pending = { timer: null, lastSent: 0, pendingValue: null };
+      this._volumeWrites.set(entityId, pending);
+    }
+    pending.pendingValue = bounded;
+
+    const send = () => {
+      if (pending.timer) clearTimeout(pending.timer);
+      pending.timer = null;
+      const value = pending.pendingValue;
+      pending.pendingValue = null;
+      pending.lastSent = Date.now();
+      this._hass.callService("media_player", "volume_set", {
+        entity_id: entityId,
+        volume_level: value / 100,
+      }).catch(() => {
+        this._optimisticVolumes.delete(entityId);
+        this._updateNowPlaying();
+      });
+    };
+
+    const elapsed = Date.now() - pending.lastSent;
+    if (flush || pending.lastSent === 0 || elapsed >= 90) {
+      send();
+      return;
+    }
+    if (!pending.timer) {
+      pending.timer = setTimeout(send, Math.max(0, 90 - elapsed));
+    }
+  }
+
+  _optimisticVolume(entityId, actualPercent) {
+    const pending = this._optimisticVolumes.get(entityId);
+    if (!pending) return actualPercent;
+    if (Date.now() >= pending.until || Math.abs(actualPercent - pending.value) <= 1) {
+      this._optimisticVolumes.delete(entityId);
+      return actualPercent;
+    }
+    return pending.value;
+  }
+
+  _setVolume(percent, flush = false) {
+    if (!this._selectedPlayer) return;
+    const bounded = this._setOptimisticVolume(this._selectedPlayer, percent);
     const slider = this.shadowRoot.getElementById("volume");
     if (slider) slider.value = bounded;
-    this._hass.callService("media_player", "volume_set", {
-      entity_id: this._selectedPlayer,
-      volume_level: bounded / 100,
-    });
+    this._queueVolumeWrite(this._selectedPlayer, bounded, flush);
   }
 
   _wire() {
@@ -714,6 +773,8 @@ class FamilyMusicCard extends HTMLElement {
       this._groupMembers = [];
       this._groupMembersFor = null;
       this._membersExpanded = false;
+      this._optimisticPlayback = null;
+      this._optimisticPlaybackUntil = 0;
       localStorage.setItem("family-music-card-player", this._selectedPlayer);
       this._updateNowPlaying();
       this._loadGroupMembers(false);
@@ -741,12 +802,28 @@ class FamilyMusicCard extends HTMLElement {
       }
     });
     this.shadowRoot.getElementById("playPause")?.addEventListener("click", () => {
-      const state = this._hass?.states?.[this._selectedPlayer]?.state;
-      if (this._selectedPlayer) {
-        this._hass.callService("media_player", state === "playing" ? "media_pause" : "media_play", {
-          entity_id: this._selectedPlayer,
-        });
+      if (!this._selectedPlayer) return;
+      const actualState = this._hass?.states?.[this._selectedPlayer]?.state;
+      const effectiveState =
+        this._optimisticPlayback && Date.now() < this._optimisticPlaybackUntil
+          ? this._optimisticPlayback
+          : actualState;
+      const targetState = effectiveState === "playing" ? "paused" : "playing";
+      this._optimisticPlayback = targetState;
+      this._optimisticPlaybackUntil = Date.now() + 1800;
+      const button = this.shadowRoot.getElementById("playPause");
+      if (button) {
+        button.innerHTML = `<ha-icon icon="${targetState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
       }
+      this._hass.callService(
+        "media_player",
+        targetState === "playing" ? "media_play" : "media_pause",
+        { entity_id: this._selectedPlayer }
+      ).catch(() => {
+        this._optimisticPlayback = null;
+        this._optimisticPlaybackUntil = 0;
+        this._updateNowPlaying();
+      });
     });
     const progress = this.shadowRoot.getElementById("trackProgress");
     progress?.addEventListener("input", (event) => {
@@ -789,15 +866,18 @@ class FamilyMusicCard extends HTMLElement {
       });
     });
     this.shadowRoot.getElementById("volume")?.addEventListener("input", (event) => {
-      this._setVolume(Number(event.target.value));
+      this._setVolume(Number(event.target.value), false);
+    });
+    this.shadowRoot.getElementById("volume")?.addEventListener("change", (event) => {
+      this._setVolume(Number(event.target.value), true);
     });
     this.shadowRoot.getElementById("volumeDown")?.addEventListener("click", () => {
       const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
-      this._setVolume(current - 5);
+      this._setVolume(current - 5, true);
     });
     this.shadowRoot.getElementById("volumeUp")?.addEventListener("click", () => {
       const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
-      this._setVolume(current + 5);
+      this._setVolume(current + 5, true);
     });
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
@@ -925,10 +1005,22 @@ class FamilyMusicCard extends HTMLElement {
         [attrs.media_artist, attrs.media_album_name].filter(Boolean).join(" · ") || "—";
     }
     if (playPause) {
-      playPause.innerHTML = `<ha-icon icon="${state.state === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
+      if (
+        this._optimisticPlayback &&
+        (Date.now() >= this._optimisticPlaybackUntil || state.state === this._optimisticPlayback)
+      ) {
+        this._optimisticPlayback = null;
+        this._optimisticPlaybackUntil = 0;
+      }
+      const playbackState =
+        this._optimisticPlayback && Date.now() < this._optimisticPlaybackUntil
+          ? this._optimisticPlayback
+          : state.state;
+      playPause.innerHTML = `<ha-icon icon="${playbackState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
     }
     if (volume && attrs.volume_level != null) {
-      volume.value = Math.round(attrs.volume_level * 100);
+      const actualPercent = Math.round(attrs.volume_level * 100);
+      volume.value = this._optimisticVolume(this._selectedPlayer, actualPercent);
     }
     if (this._membersExpanded && this._groupMembersFor === this._selectedPlayer) {
       this._groupMembers.forEach((member) => {
@@ -939,10 +1031,12 @@ class FamilyMusicCard extends HTMLElement {
           `.member-volume[data-entity="${CSS.escape(member.entity_id)}"]`
         );
         if (slider && document.activeElement !== slider) {
-          slider.value = Math.round(memberVolume * 100);
+          const actualPercent = Math.round(memberVolume * 100);
+          const displayPercent = this._optimisticVolume(member.entity_id, actualPercent);
+          slider.value = displayPercent;
           const row = slider.closest(".member-volume-row");
           const display = row?.querySelector(".member-volume-value");
-          if (display) display.textContent = `${Math.round(memberVolume * 100)}%`;
+          if (display) display.textContent = `${displayPercent}%`;
         }
       });
     }
