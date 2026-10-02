@@ -295,7 +295,7 @@ class FamilyMusicCard extends HTMLElement {
       this._groupMembersLoading = false;
       if (this._view === "now" && this._selectedPlayer === player) {
         this._renderMemberVolumePanel();
-        if (this._moreOpen) this._renderNowOverlays();
+    
       }
     }
   }
@@ -1196,7 +1196,7 @@ class FamilyMusicCard extends HTMLElement {
       volume.value = displayPercent;
       if (volumeValue) volumeValue.textContent = String(displayPercent);
     }
-    if (this._membersExpanded && this._groupMembersFor === this._selectedPlayer) {
+    if ((this._membersExpanded || this._moreOpen) && this._groupMembersFor === this._selectedPlayer) {
       this._groupMembers.forEach((member) => {
         const memberState = this._hass.states[member.entity_id];
         const memberVolume = memberState?.attributes?.volume_level;
