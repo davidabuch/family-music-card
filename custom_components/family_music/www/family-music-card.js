@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.2.1";
+const CARD_VERSION = "0.2.2";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -23,6 +23,10 @@ class FamilyMusicCard extends HTMLElement {
     this._refreshTick = 0;
     this._refreshInFlight = false;
     this._seeking = false;
+    this._groupMembers = [];
+    this._groupMembersFor = null;
+    this._groupMembersLoading = false;
+    this._membersExpanded = false;
   }
 
   setConfig(config) {
@@ -107,6 +111,113 @@ class FamilyMusicCard extends HTMLElement {
       type,
       config_entry_id: this._config.config_entry_id,
       ...payload,
+    });
+  }
+
+  _isSelectedGroup() {
+    return this._hass?.states?.[this._selectedPlayer]?.attributes?.mass_player_type === "group";
+  }
+
+  async _loadGroupMembers(force = false) {
+    if (!this._selectedPlayer || !this._hass || !this._isSelectedGroup()) {
+      this._groupMembers = [];
+      this._groupMembersFor = this._selectedPlayer;
+      this._groupMembersLoading = false;
+      return;
+    }
+    if (!force && this._groupMembersFor === this._selectedPlayer) return;
+    if (this._groupMembersLoading) return;
+
+    const player = this._selectedPlayer;
+    this._groupMembersLoading = true;
+    try {
+      const members = await this._ws("family_music/group_members", {
+        player_entity_id: player,
+      });
+      if (this._selectedPlayer === player) {
+        this._groupMembers = Array.isArray(members) ? members : [];
+        this._groupMembersFor = player;
+      }
+    } catch (_error) {
+      if (this._selectedPlayer === player) {
+        this._groupMembers = [];
+        this._groupMembersFor = player;
+      }
+    } finally {
+      this._groupMembersLoading = false;
+      if (this._view === "now" && this._selectedPlayer === player) {
+        this._renderMemberVolumePanel();
+      }
+    }
+  }
+
+  _memberVolumeMarkup() {
+    if (!this._isSelectedGroup()) return "";
+    const count = this._groupMembers.length;
+    const label = count ? `Speakers · ${count}` : "Speakers";
+    const chevron = this._membersExpanded ? "mdi:chevron-up" : "mdi:chevron-down";
+    const rows = this._membersExpanded
+      ? this._groupMembers.map((member) => {
+          const state = this._hass?.states?.[member.entity_id];
+          const volume = state?.attributes?.volume_level;
+          const value = volume == null ? 0 : Math.round(volume * 100);
+          const disabled = !member.available || !state ? "disabled" : "";
+          return `
+            <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
+              <div class="member-volume-name">${this._escape(member.name)}</div>
+              <input class="member-volume" data-entity="${this._escape(member.entity_id)}"
+                type="range" min="0" max="100" step="1" value="${value}" ${disabled}
+                aria-label="${this._escape(member.name)} volume">
+              <div class="member-volume-value">${value}%</div>
+            </div>
+          `;
+        }).join("")
+      : "";
+    const empty = this._membersExpanded && !this._groupMembersLoading && !count
+      ? '<div class="member-volume-empty">No group members found.</div>'
+      : "";
+    const loading = this._membersExpanded && this._groupMembersLoading
+      ? '<div class="member-volume-empty">Loading speakers…</div>'
+      : "";
+    return `
+      <div class="member-volume-panel">
+        <button id="toggleMembers" class="member-volume-toggle" type="button">
+          <span>${label}</span><ha-icon icon="${chevron}"></ha-icon>
+        </button>
+        <div id="memberVolumeRows">${loading}${empty}${rows}</div>
+      </div>
+    `;
+  }
+
+  _renderMemberVolumePanel() {
+    const host = this.shadowRoot.getElementById("memberVolumeHost");
+    if (!host) return;
+    host.innerHTML = this._memberVolumeMarkup();
+    this._wireMemberVolumePanel();
+  }
+
+  _wireMemberVolumePanel() {
+    this.shadowRoot.getElementById("toggleMembers")?.addEventListener("click", async () => {
+      this._membersExpanded = !this._membersExpanded;
+      this._renderMemberVolumePanel();
+      if (this._membersExpanded) await this._loadGroupMembers(true);
+    });
+    this.shadowRoot.querySelectorAll(".member-volume").forEach((slider) => {
+      slider.addEventListener("input", (event) => {
+        const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
+        const row = event.target.closest(".member-volume-row");
+        const display = row?.querySelector(".member-volume-value");
+        if (display) display.textContent = `${Math.round(value)}%`;
+      });
+      slider.addEventListener("change", async (event) => {
+        const entityId = event.target.dataset.entity;
+        if (!entityId) return;
+        const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
+        await this._hass.callService("media_player", "volume_set", {
+          entity_id: entityId,
+          volume_level: value / 100,
+        });
+      });
     });
   }
 
@@ -323,6 +434,7 @@ class FamilyMusicCard extends HTMLElement {
                 <ha-icon icon="mdi:chevron-right"></ha-icon>
               </button>
             </div>
+            <div id="memberVolumeHost">${this._memberVolumeMarkup()}</div>
           </div>
         </div>
         ${this._renderNavStrip("now")}
@@ -599,8 +711,12 @@ class FamilyMusicCard extends HTMLElement {
     const playerSelect = this.shadowRoot.getElementById("playerSelect");
     playerSelect?.addEventListener("change", (event) => {
       this._selectedPlayer = event.target.value;
+      this._groupMembers = [];
+      this._groupMembersFor = null;
+      this._membersExpanded = false;
       localStorage.setItem("family-music-card-player", this._selectedPlayer);
       this._updateNowPlaying();
+      this._loadGroupMembers(false);
     });
 
     const openSearch = () => {
@@ -713,7 +829,9 @@ class FamilyMusicCard extends HTMLElement {
     this.shadowRoot.getElementById("playAlbum")?.addEventListener("click", () => this._playAlbum(false));
     this.shadowRoot.getElementById("shuffleAlbum")?.addEventListener("click", () => this._playAlbum(true));
 
+    this._wireMemberVolumePanel();
     this._wireBrowserItems();
+    this._loadGroupMembers(false);
   }
 
   _wireBrowserItems() {
@@ -812,6 +930,22 @@ class FamilyMusicCard extends HTMLElement {
     if (volume && attrs.volume_level != null) {
       volume.value = Math.round(attrs.volume_level * 100);
     }
+    if (this._membersExpanded && this._groupMembersFor === this._selectedPlayer) {
+      this._groupMembers.forEach((member) => {
+        const memberState = this._hass.states[member.entity_id];
+        const memberVolume = memberState?.attributes?.volume_level;
+        if (memberVolume == null) return;
+        const slider = this.shadowRoot.querySelector(
+          `.member-volume[data-entity="${CSS.escape(member.entity_id)}"]`
+        );
+        if (slider && document.activeElement !== slider) {
+          slider.value = Math.round(memberVolume * 100);
+          const row = slider.closest(".member-volume-row");
+          const display = row?.querySelector(".member-volume-value");
+          if (display) display.textContent = `${Math.round(memberVolume * 100)}%`;
+        }
+      });
+    }
     if (muteToggle) {
       const muted = Boolean(attrs.is_volume_muted);
       muteToggle.title = muted ? "Unmute" : "Mute";
@@ -876,6 +1010,7 @@ class FamilyMusicCard extends HTMLElement {
       .transport-button{width:40px;height:40px;background:transparent;color:rgba(255,255,255,.92)}.play-button{width:56px;height:56px;background:rgba(55,55,55,.62);color:#fff;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.play-button ha-icon{--mdc-icon-size:30px}.transport-button ha-icon{--mdc-icon-size:27px}
       .progress-wrap{margin-top:6px}.progress-time{display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.82);margin-bottom:2px}.track-progress{width:100%;height:18px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,var(--primary-color) 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--primary-color);margin-top:-5px;box-shadow:0 0 0 2px rgba(255,255,255,.88);cursor:pointer}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(0,0,0,.14)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:var(--primary-color)}.track-progress::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:var(--primary-color)}
       .volume-row{display:grid;grid-template-columns:34px 22px minmax(0,1fr) 22px;gap:4px;align-items:center;margin-top:4px}.volume{width:100%;height:18px;margin:0}.mute-toggle{width:34px;height:34px;border:0;background:transparent;color:rgba(255,255,255,.94);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(55,55,55,.62);color:#fff}.volume-nudge{width:22px;height:26px;border:0;background:transparent;color:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.volume-nudge ha-icon{--mdc-icon-size:17px}
+      .member-volume-panel{margin-top:2px;border-top:1px solid rgba(255,255,255,.18);padding-top:2px}.member-volume-toggle{width:100%;height:28px;padding:0 2px;border:0;background:transparent;color:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;cursor:pointer}.member-volume-toggle ha-icon{--mdc-icon-size:18px}.member-volume-row{display:grid;grid-template-columns:minmax(72px,1fr) minmax(110px,2fr) 34px;gap:8px;align-items:center;min-height:30px}.member-volume-name{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.9)}.member-volume{width:100%;height:18px;margin:0}.member-volume-value{font-size:10px;text-align:right;color:rgba(255,255,255,.76)}.member-volume-empty{font-size:11px;color:rgba(255,255,255,.72);padding:5px 2px 3px}
       .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
       .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
