@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.2.3"
+    assert manifest["version"] == "0.3.0"
     assert card_path.exists()
 
 
@@ -81,8 +81,8 @@ def test_fast_refresh_and_volume_step_controls():
     assert "this._refreshTick % 3 === 0" in card_text
     assert 'id="volumeDown"' in card_text
     assert 'id="volumeUp"' in card_text
-    assert "current - 5" in card_text
-    assert "current + 5" in card_text
+    assert "current - 1" in card_text
+    assert "current + 1" in card_text
     assert 'addEventListener("input"' in card_text
 
 
@@ -108,10 +108,10 @@ def test_refined_progress_and_compact_volume_controls():
     assert 'id="trackProgress" class="track-progress" type="range"' in card_text
     assert "--progress-pct" in card_text
     assert 'class="volume-nudge"' in card_text
-    assert "grid-template-columns:34px 22px minmax(0,1fr) 22px" in card_text
+    assert "grid-template-columns:38px 32px minmax(0,1fr) 34px 32px" in card_text
 
 
-def test_glass_player_and_seekable_progress():
+def test_sonos_inspired_now_playing_and_seekable_progress():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
@@ -119,13 +119,17 @@ def test_glass_player_and_seekable_progress():
     assert "seek_position" in card_text
     assert "this._seeking = true" in card_text
     assert "progress && !this._seeking" in card_text
-    assert "backdrop-filter:blur(22px) saturate(165%)" in card_text
-    assert "background:rgba(255,255,255,.18)" in card_text
-    assert "pointer-events:none" not in card_text
+    assert 'id="artImage"' in card_text
+    assert 'id="openSearch"' in card_text
+    assert 'id="destinationButton"' in card_text
+    assert 'id="moreButton"' in card_text
+    assert 'id="volumeValue"' in card_text
+    assert "hero-bg" in card_text
+    assert "destination-pill" in card_text
 
 
 
-def test_group_member_volume_controls():
+def test_group_member_volume_controls_live_in_more_menu():
     init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
@@ -134,8 +138,8 @@ def test_group_member_volume_controls():
     assert '"players/all"' in init_text
     assert 'entry.platform == "music_assistant"' in init_text
     assert '"group_members"' in init_text
-    assert 'id="memberVolumeHost"' in card_text
-    assert 'id="toggleMembers"' in card_text
+    assert 'id="moreButton"' in card_text
+    assert "Speaker volumes" in card_text
     assert 'class="member-volume"' in card_text
     assert 'player_entity_id: player' in card_text
     assert 'entity_id: entityId' in card_text
@@ -156,3 +160,31 @@ def test_optimistic_responsive_media_controls():
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
     assert "Date.now() + 1800" in card_text
+
+
+
+def test_now_playing_bottom_action_model():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="openSearch"' in card_text
+    assert 'icon="mdi:magnify"' in card_text
+    assert 'id="destinationButton"' in card_text
+    assert "Change playback destination" in card_text
+    assert 'id="moreButton"' in card_text
+    assert 'icon="mdi:dots-horizontal"' in card_text
+    assert "_renderDestinationMenu()" in card_text
+    assert "_renderMoreMenu()" in card_text
+    assert "Play in" in card_text
+
+
+def test_main_volume_keeps_mute_and_one_point_nudges():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="muteToggle"' in card_text
+    assert 'id="volumeDown"' in card_text
+    assert 'id="volumeUp"' in card_text
+    assert 'id="volumeValue"' in card_text
+    assert "current - 1" in card_text
+    assert "current + 1" in card_text
