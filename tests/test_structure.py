@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.1"
+    assert manifest["version"] == "0.3.2"
     assert card_path.exists()
 
 
@@ -159,7 +159,7 @@ def test_optimistic_responsive_media_controls():
     assert "elapsed >= 60" in card_text
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
-    assert "Date.now() + 1800" in card_text
+    assert "Date.now() + 5000" in card_text
 
 
 
@@ -209,3 +209,13 @@ def test_volume_drag_coalescing_is_faster():
     ).read_text()
     assert "elapsed >= 60" in card_text
     assert "Math.max(0, 60 - elapsed)" in card_text
+
+
+
+def test_optimistic_volume_waits_for_exact_acknowledgement():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "actualPercent === pending.value" in card_text
+    assert "Math.abs(actualPercent - pending.value) <= 1" not in card_text
+    assert "Date.now() + 5000" in card_text
