@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.4"
+    assert manifest["version"] == "0.3.5"
     assert card_path.exists()
 
 
@@ -255,3 +255,14 @@ def test_now_playing_uses_music_search_icon():
     assert 'class="music-search-capsule"' in card_text
     search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
     assert 'icon="mdi:magnify"' not in search_button
+
+
+
+def test_music_search_icon_is_round_and_full_bleed():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert '<circle class="music-search-tile"' in card_text
+    assert 'class="music-search-icon"' in card_text
+    assert ".music-search-icon{width:100%;height:100%" in card_text
+    assert ".music-search-button{overflow:hidden;padding:0;background:transparent}" in card_text
