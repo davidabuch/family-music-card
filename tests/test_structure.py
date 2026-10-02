@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.2.1"
     assert card_path.exists()
 
 
@@ -109,3 +109,16 @@ def test_refined_progress_and_compact_volume_controls():
     assert "--progress-pct" in card_text
     assert 'class="volume-nudge"' in card_text
     assert "grid-template-columns:34px 24px minmax(0,1fr) 24px" in card_text
+
+
+def test_glass_player_and_seekable_progress():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert '"media_seek"' in card_text
+    assert "seek_position" in card_text
+    assert "this._seeking = true" in card_text
+    assert "progress && !this._seeking" in card_text
+    assert "backdrop-filter:blur(22px) saturate(165%)" in card_text
+    assert "background:rgba(255,255,255,.18)" in card_text
+    assert "pointer-events:none" not in card_text
