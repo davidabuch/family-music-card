@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.3";
+const CARD_VERSION = "0.3.4";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -618,8 +618,30 @@ class FamilyMusicCard extends HTMLElement {
             </div>
 
             <div class="bottom-actions">
-              <button id="openSearch" class="bottom-circle" title="Choose music" aria-label="Choose music">
-                <ha-icon icon="mdi:magnify"></ha-icon>
+              <button id="openSearch" class="bottom-circle music-search-button" title="Choose music" aria-label="Choose music">
+                <svg class="music-search-icon" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+                  <defs>
+                    <linearGradient id="musicSearchGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#ff4f8f"></stop>
+                      <stop offset="55%" stop-color="#ff174f"></stop>
+                      <stop offset="100%" stop-color="#ef002f"></stop>
+                    </linearGradient>
+                    <linearGradient id="musicSearchGloss" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#ffffff" stop-opacity=".62"></stop>
+                      <stop offset="100%" stop-color="#ffffff" stop-opacity=".12"></stop>
+                    </linearGradient>
+                  </defs>
+                  <rect class="music-search-tile" x="2" y="2" width="60" height="60" rx="14" fill="url(#musicSearchGradient)"></rect>
+                  <path class="music-search-shine" d="M6 18C12 8 24 5 38 5h10c5 0 9 1 12 3v7c-6-3-12-4-20-4H23c-7 0-12 2-17 7z" fill="url(#musicSearchGloss)" opacity=".6"></path>
+                  <g class="music-search-note" fill="#fff">
+                    <path d="M31 22.5v22.2c-1.6-1.1-3.7-1.7-5.9-1.7-5.1 0-9.2 3-9.2 6.7s4.1 6.7 9.2 6.7c4.7 0 8.5-2.5 9.1-5.8h.1V31.1l15.1-3.5v12.2c-1.6-1.1-3.7-1.7-5.9-1.7-5.1 0-9.2 3-9.2 6.7s4.1 6.7 9.2 6.7c5.1 0 9.2-3 9.2-6.7V18.2L31 22.5z"></path>
+                  </g>
+                  <g class="music-search-capsule">
+                    <rect x="7" y="7" width="27" height="14" rx="7" fill="#fff" opacity=".22" stroke="#fff" stroke-opacity=".38" stroke-width=".8"></rect>
+                    <circle cx="15.2" cy="13.6" r="3.4" fill="none" stroke="#fff" stroke-width="2"></circle>
+                    <path d="M17.7 16.1l3.1 3.1" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"></path>
+                  </g>
+                </svg>
               </button>
               <button id="destinationButton" class="destination-pill" title="Change playback destination">
                 <ha-icon icon="mdi:speaker"></ha-icon>
@@ -1380,7 +1402,7 @@ class FamilyMusicCard extends HTMLElement {
       .progress-time{display:flex;justify-content:space-between;font-size:13px;color:rgba(255,255,255,.56);margin-top:1px}
       .transport{display:grid;grid-template-columns:1fr 76px 1fr;align-items:center;margin:15px 28px 14px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}
       .volume-row{display:grid;grid-template-columns:38px 32px minmax(0,1fr) 34px 32px;gap:7px;align-items:center;margin:2px 0 18px}.volume{width:100%;height:24px;margin:0}.volume-value{font-size:15px;text-align:center;color:rgba(255,255,255,.68);font-variant-numeric:tabular-nums}.mute-toggle,.volume-nudge{border:0;background:transparent;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.mute-toggle{width:38px;height:38px;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(255,255,255,.14)}.volume-nudge{width:32px;height:32px;font-size:31px;font-weight:300;line-height:1}
-      .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
+      .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden}.music-search-icon{width:39px;height:39px;display:block;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}.secondary-title{margin-top:20px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}
       .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}

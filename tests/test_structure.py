@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.3"
+    assert manifest["version"] == "0.3.4"
     assert card_path.exists()
 
 
@@ -241,3 +241,17 @@ def test_voice_search_controls_and_feature_detection():
     assert "recognition.onresult" in card_text
     assert "setTimeout(() => this._search(), 0)" in card_text
     assert "Dictation is not available on this device" in card_text
+
+
+
+def test_now_playing_uses_music_search_icon():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'class="bottom-circle music-search-button"' in card_text
+    assert 'class="music-search-icon"' in card_text
+    assert 'id="musicSearchGradient"' in card_text
+    assert 'class="music-search-note"' in card_text
+    assert 'class="music-search-capsule"' in card_text
+    search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
+    assert 'icon="mdi:magnify"' not in search_button
