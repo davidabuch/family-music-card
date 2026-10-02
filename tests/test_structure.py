@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.3.1"
     assert card_path.exists()
 
 
@@ -156,7 +156,7 @@ def test_optimistic_responsive_media_controls():
     assert "this._optimisticVolumes = new Map()" in card_text
     assert "this._volumeWrites = new Map()" in card_text
     assert "_queueVolumeWrite(entityId, percent, flush = false)" in card_text
-    assert "elapsed >= 90" in card_text
+    assert "elapsed >= 60" in card_text
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
     assert "Date.now() + 1800" in card_text
@@ -188,3 +188,24 @@ def test_main_volume_keeps_mute_and_one_point_nudges():
     assert 'id="volumeValue"' in card_text
     assert "current - 1" in card_text
     assert "current + 1" in card_text
+
+
+
+def test_group_member_volume_rows_have_one_point_nudges():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'class="member-volume-nudge member-volume-down"' in card_text
+    assert 'class="member-volume-nudge member-volume-up"' in card_text
+    assert 'data-delta="-1"' in card_text
+    assert 'data-delta="1"' in card_text
+    assert "current + delta" in card_text
+    assert "_queueVolumeWrite(entityId, next, true)" in card_text
+
+
+def test_volume_drag_coalescing_is_faster():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "elapsed >= 60" in card_text
+    assert "Math.max(0, 60 - elapsed)" in card_text
