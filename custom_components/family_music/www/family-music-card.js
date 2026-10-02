@@ -278,6 +278,7 @@ class FamilyMusicCard extends HTMLElement {
 
     const player = this._selectedPlayer;
     this._groupMembersLoading = true;
+    if (this._moreOpen) this._renderNowOverlays();
     try {
       const members = await this._ws("family_music/group_members", {
         player_entity_id: player,
