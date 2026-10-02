@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.0";
+const CARD_VERSION = "0.3.1";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -176,10 +176,16 @@ class FamilyMusicCard extends HTMLElement {
                   return `
                     <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
                       <div class="member-volume-name">${this._escape(member.name)}</div>
+                      <button class="member-volume-nudge member-volume-down"
+                        data-entity="${this._escape(member.entity_id)}" data-delta="-1"
+                        aria-label="${this._escape(member.name)} volume down 1">−</button>
                       <input class="member-volume" data-entity="${this._escape(member.entity_id)}"
                         type="range" min="0" max="100" step="1" value="${value}"
                         aria-label="${this._escape(member.name)} volume">
                       <div class="member-volume-value">${value}</div>
+                      <button class="member-volume-nudge member-volume-up"
+                        data-entity="${this._escape(member.entity_id)}" data-delta="1"
+                        aria-label="${this._escape(member.name)} volume up 1">+</button>
                     </div>
                   `;
                 }).join("")
@@ -367,6 +373,21 @@ class FamilyMusicCard extends HTMLElement {
         if (!entityId) return;
         const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
         this._queueVolumeWrite(entityId, value, true);
+      });
+    });
+    this.shadowRoot.querySelectorAll(".member-volume-nudge").forEach((button) => {
+      button.addEventListener("click", () => {
+        const entityId = button.dataset.entity;
+        const delta = Number(button.dataset.delta || 0);
+        if (!entityId || !delta) return;
+        const row = button.closest(".member-volume-row");
+        const slider = row?.querySelector(".member-volume");
+        const current = Number(slider?.value || 0);
+        const next = Math.max(0, Math.min(100, current + delta));
+        if (slider) slider.value = next;
+        const display = row?.querySelector(".member-volume-value");
+        if (display) display.textContent = String(next);
+        this._queueVolumeWrite(entityId, next, true);
       });
     });
   }
@@ -894,12 +915,12 @@ class FamilyMusicCard extends HTMLElement {
     };
 
     const elapsed = Date.now() - pending.lastSent;
-    if (flush || pending.lastSent === 0 || elapsed >= 90) {
+    if (flush || pending.lastSent === 0 || elapsed >= 60) {
       send();
       return;
     }
     if (!pending.timer) {
-      pending.timer = setTimeout(send, Math.max(0, 90 - elapsed));
+      pending.timer = setTimeout(send, Math.max(0, 60 - elapsed));
     }
   }
 
@@ -1283,7 +1304,7 @@ class FamilyMusicCard extends HTMLElement {
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}.secondary-title{margin-top:20px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}
-      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(120px,2fr) 34px;gap:9px;align-items:center;min-height:34px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}
+      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
       .browser-title{font-size:23px;font-weight:800;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.provider-row{display:flex;gap:8px;flex-wrap:wrap;padding:14px 14px 0}
       .provider-chip{border:1px solid var(--divider-color);border-radius:999px;padding:9px 13px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-weight:700;cursor:pointer}
