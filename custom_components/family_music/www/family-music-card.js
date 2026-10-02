@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.2.3";
+const CARD_VERSION = "0.3.0";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -31,6 +31,8 @@ class FamilyMusicCard extends HTMLElement {
     this._optimisticPlaybackUntil = 0;
     this._optimisticVolumes = new Map();
     this._volumeWrites = new Map();
+    this._destinationOpen = false;
+    this._moreOpen = false;
   }
 
   setConfig(config) {
@@ -126,6 +128,144 @@ class FamilyMusicCard extends HTMLElement {
     return this._hass?.states?.[this._selectedPlayer]?.attributes?.mass_player_type === "group";
   }
 
+  _selectedPlayerName() {
+    return (
+      this._hass?.states?.[this._selectedPlayer]?.attributes?.friendly_name ||
+      this._selectedPlayer ||
+      "Choose speaker"
+    );
+  }
+
+  _renderDestinationMenu() {
+    if (!this._destinationOpen) return "";
+    const players = (this._config?.players || [])
+      .filter((entityId) => this._hass?.states?.[entityId])
+      .map((entityId) => {
+        const name = this._hass.states[entityId]?.attributes?.friendly_name || entityId;
+        const selected = entityId === this._selectedPlayer;
+        return `
+          <button class="destination-option ${selected ? "selected" : ""}" data-destination="${this._escape(entityId)}">
+            <ha-icon icon="${selected ? "mdi:check-circle" : "mdi:speaker"}"></ha-icon>
+            <span>${this._escape(name)}</span>
+          </button>
+        `;
+      })
+      .join("");
+    return `
+      <div class="now-popover destination-popover">
+        <div class="popover-title">Play in</div>
+        <div class="destination-list">${players}</div>
+      </div>
+    `;
+  }
+
+  _renderMoreMenu() {
+    if (!this._moreOpen) return "";
+    const groupSection = this._isSelectedGroup()
+      ? `
+        <div class="popover-section-title">Speaker volumes</div>
+        <div class="member-volume-list">
+          ${this._groupMembersLoading
+            ? '<div class="menu-status">Loading speakers…</div>'
+            : this._groupMembers.length
+              ? this._groupMembers.map((member) => {
+                  const state = this._hass?.states?.[member.entity_id];
+                  const volume = state?.attributes?.volume_level;
+                  const actualPercent = volume == null ? 0 : Math.round(volume * 100);
+                  const value = this._optimisticVolume(member.entity_id, actualPercent);
+                  return `
+                    <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
+                      <div class="member-volume-name">${this._escape(member.name)}</div>
+                      <input class="member-volume" data-entity="${this._escape(member.entity_id)}"
+                        type="range" min="0" max="100" step="1" value="${value}"
+                        aria-label="${this._escape(member.name)} volume">
+                      <div class="member-volume-value">${value}</div>
+                    </div>
+                  `;
+                }).join("")
+              : '<div class="menu-status">No group members found.</div>'}
+        </div>
+      `
+      : '<div class="menu-status">This destination is a single speaker.</div>';
+
+    const attrs = this._hass?.states?.[this._selectedPlayer]?.attributes || {};
+    const repeat = attrs.repeat || "off";
+    const shuffled = Boolean(attrs.shuffle);
+    return `
+      <div class="now-popover more-popover">
+        ${groupSection}
+        <div class="popover-section-title secondary-title">Playback</div>
+        <div class="more-actions">
+          <button id="moreShuffle" class="more-action ${shuffled ? "active" : ""}">
+            <ha-icon icon="mdi:shuffle"></ha-icon><span>Shuffle</span>
+          </button>
+          <button id="moreRepeat" class="more-action ${repeat !== "off" ? "active" : ""}">
+            <ha-icon icon="mdi:repeat"></ha-icon><span>Repeat: ${this._escape(repeat)}</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  _renderNowOverlays() {
+    const overlay = this.shadowRoot.getElementById("nowOverlay");
+    if (!overlay) return;
+    const anyOpen = this._destinationOpen || this._moreOpen;
+    overlay.classList.toggle("open", anyOpen);
+    overlay.innerHTML = anyOpen
+      ? `<button id="overlayScrim" class="overlay-scrim" aria-label="Close"></button>
+         ${this._renderDestinationMenu()}
+         ${this._renderMoreMenu()}`
+      : "";
+    this._wireNowOverlays();
+  }
+
+  _wireNowOverlays() {
+    this.shadowRoot.getElementById("overlayScrim")?.addEventListener("click", () => {
+      this._destinationOpen = false;
+      this._moreOpen = false;
+      this._renderNowOverlays();
+    });
+    this.shadowRoot.querySelectorAll("[data-destination]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const entityId = button.dataset.destination;
+        if (!entityId || entityId === this._selectedPlayer) {
+          this._destinationOpen = false;
+          this._renderNowOverlays();
+          return;
+        }
+        this._selectedPlayer = entityId;
+        this._groupMembers = [];
+        this._groupMembersFor = null;
+        this._membersExpanded = false;
+        this._destinationOpen = false;
+        this._moreOpen = false;
+        this._optimisticPlayback = null;
+        this._optimisticPlaybackUntil = 0;
+        localStorage.setItem("family-music-card-player", entityId);
+        this._render();
+      });
+    });
+    this.shadowRoot.getElementById("moreShuffle")?.addEventListener("click", () => {
+      if (!this._selectedPlayer) return;
+      const current = Boolean(this._hass?.states?.[this._selectedPlayer]?.attributes?.shuffle);
+      this._hass.callService("media_player", "shuffle_set", {
+        entity_id: this._selectedPlayer,
+        shuffle: !current,
+      });
+    });
+    this.shadowRoot.getElementById("moreRepeat")?.addEventListener("click", () => {
+      if (!this._selectedPlayer) return;
+      const current = this._hass?.states?.[this._selectedPlayer]?.attributes?.repeat || "off";
+      const next = current === "off" ? "all" : current === "all" ? "one" : "off";
+      this._hass.callService("media_player", "repeat_set", {
+        entity_id: this._selectedPlayer,
+        repeat: next,
+      });
+    });
+    this._wireMemberVolumePanel();
+  }
+
   async _loadGroupMembers(force = false) {
     if (!this._selectedPlayer || !this._hass || !this._isSelectedGroup()) {
       this._groupMembers = [];
@@ -155,6 +295,7 @@ class FamilyMusicCard extends HTMLElement {
       this._groupMembersLoading = false;
       if (this._view === "now" && this._selectedPlayer === player) {
         this._renderMemberVolumePanel();
+        if (this._moreOpen) this._renderNowOverlays();
       }
     }
   }
@@ -405,47 +546,60 @@ class FamilyMusicCard extends HTMLElement {
   }
 
   _renderNowView() {
+    const playerName = this._selectedPlayerName();
     return `
       <div class="now-shell">
-        <div class="topbar">
-          <select id="playerSelect" class="player-select"></select>
-          <button id="openSearch" class="circle-button search-button" title="Choose music" aria-label="Choose music">
-            <ha-icon icon="mdi:magnify"></ha-icon>
-          </button>
-        </div>
         <div id="hero" class="hero">
-          <div class="hero-placeholder"><ha-icon icon="mdi:music"></ha-icon></div>
+          <img id="bgImage" class="hero-bg" alt="">
           <div class="hero-shade"></div>
-          <div class="track-card">
-            <div id="trackTitle" class="track-title">Nothing playing</div>
-            <div id="trackMeta" class="track-meta">—</div>
-          </div>
-          <div class="controls-card">
-            <div class="transport">
-              <button id="prev" class="transport-button"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
-              <button id="playPause" class="play-button"><ha-icon icon="mdi:play"></ha-icon></button>
-              <button id="next" class="transport-button"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+          <div class="now-content">
+            <div class="artwork-stage">
+              <div class="artwork-placeholder"><ha-icon icon="mdi:music"></ha-icon></div>
+              <img id="artImage" class="now-artwork" alt="">
             </div>
+
+            <div class="track-copy-main">
+              <div id="trackTitle" class="track-title">Nothing playing</div>
+              <div id="trackMeta" class="track-meta">—</div>
+            </div>
+
             <div class="progress-wrap">
+              <input id="trackProgress" class="track-progress" type="range" min="0" max="100" step="0.1" value="0" aria-label="Track progress">
               <div class="progress-time"><span id="elapsed">0:00</span><span id="remaining">-0:00</span></div>
-              <input id="trackProgress" class="track-progress" type="range" min="0" max="100" step="0.1" value="0" tabindex="-1" aria-label="Track progress">
             </div>
+
+            <div class="transport">
+              <button id="prev" class="transport-button" aria-label="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
+              <button id="playPause" class="play-button" aria-label="Play or pause"><ha-icon icon="mdi:play"></ha-icon></button>
+              <button id="next" class="transport-button" aria-label="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+            </div>
+
             <div class="volume-row">
               <button id="muteToggle" class="mute-toggle" title="Mute" aria-label="Mute">
                 <ha-icon icon="mdi:volume-high"></ha-icon>
               </button>
-              <button id="volumeDown" class="volume-nudge" title="Volume down" aria-label="Volume down">
-                <ha-icon icon="mdi:chevron-left"></ha-icon>
-              </button>
+              <button id="volumeDown" class="volume-nudge" title="Volume down 1" aria-label="Volume down 1">−</button>
               <input id="volume" class="volume" type="range" min="0" max="100" step="1" value="20">
-              <button id="volumeUp" class="volume-nudge" title="Volume up" aria-label="Volume up">
-                <ha-icon icon="mdi:chevron-right"></ha-icon>
+              <span id="volumeValue" class="volume-value">20</span>
+              <button id="volumeUp" class="volume-nudge" title="Volume up 1" aria-label="Volume up 1">+</button>
+            </div>
+
+            <div class="bottom-actions">
+              <button id="openSearch" class="bottom-circle" title="Choose music" aria-label="Choose music">
+                <ha-icon icon="mdi:magnify"></ha-icon>
+              </button>
+              <button id="destinationButton" class="destination-pill" title="Change playback destination">
+                <ha-icon icon="mdi:speaker"></ha-icon>
+                <span id="destinationName">${this._escape(playerName)}</span>
+                <ha-icon class="destination-chevron" icon="mdi:chevron-up"></ha-icon>
+              </button>
+              <button id="moreButton" class="bottom-circle" title="Group and playback options" aria-label="More options">
+                <ha-icon icon="mdi:dots-horizontal"></ha-icon>
               </button>
             </div>
-            <div id="memberVolumeHost">${this._memberVolumeMarkup()}</div>
           </div>
+          <div id="nowOverlay" class="now-overlay"></div>
         </div>
-        ${this._renderNavStrip("now")}
       </div>
     `;
   }
@@ -763,6 +917,8 @@ class FamilyMusicCard extends HTMLElement {
     const bounded = this._setOptimisticVolume(this._selectedPlayer, percent);
     const slider = this.shadowRoot.getElementById("volume");
     if (slider) slider.value = bounded;
+    const display = this.shadowRoot.getElementById("volumeValue");
+    if (display) display.textContent = String(bounded);
     this._queueVolumeWrite(this._selectedPlayer, bounded, flush);
   }
 
@@ -787,6 +943,19 @@ class FamilyMusicCard extends HTMLElement {
     };
     this.shadowRoot.getElementById("openSearch")?.addEventListener("click", openSearch);
     this.shadowRoot.getElementById("navSearch")?.addEventListener("click", openSearch);
+    this.shadowRoot.getElementById("destinationButton")?.addEventListener("click", () => {
+      this._destinationOpen = !this._destinationOpen;
+      this._moreOpen = false;
+      this._renderNowOverlays();
+    });
+    this.shadowRoot.getElementById("moreButton")?.addEventListener("click", async () => {
+      this._moreOpen = !this._moreOpen;
+      this._destinationOpen = false;
+      this._renderNowOverlays();
+      if (this._moreOpen && this._isSelectedGroup()) {
+        await this._loadGroupMembers(true);
+      }
+    });
     this.shadowRoot.getElementById("navNow")?.addEventListener("click", () => this._setView("now"));
     this.shadowRoot.getElementById("navRecents")?.addEventListener("click", () => this._openRecents());
     this.shadowRoot.getElementById("navFavorites")?.addEventListener("click", () => this._openFavorites());
@@ -873,11 +1042,11 @@ class FamilyMusicCard extends HTMLElement {
     });
     this.shadowRoot.getElementById("volumeDown")?.addEventListener("click", () => {
       const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
-      this._setVolume(current - 5, true);
+      this._setVolume(current - 1, true);
     });
     this.shadowRoot.getElementById("volumeUp")?.addEventListener("click", () => {
       const current = Number(this.shadowRoot.getElementById("volume")?.value || 0);
-      this._setVolume(current + 5, true);
+      this._setVolume(current + 1, true);
     });
 
     this.shadowRoot.getElementById("browserClose")?.addEventListener("click", () => this._setView("now"));
@@ -911,6 +1080,7 @@ class FamilyMusicCard extends HTMLElement {
 
     this._wireMemberVolumePanel();
     this._wireBrowserItems();
+    this._wireNowOverlays();
     this._loadGroupMembers(false);
   }
 
@@ -997,7 +1167,9 @@ class FamilyMusicCard extends HTMLElement {
     const progress = this.shadowRoot.getElementById("trackProgress");
     const elapsed = this.shadowRoot.getElementById("elapsed");
     const remaining = this.shadowRoot.getElementById("remaining");
-    const hero = this.shadowRoot.getElementById("hero");
+    const volumeValue = this.shadowRoot.getElementById("volumeValue");
+    const bgImage = this.shadowRoot.getElementById("bgImage");
+    const artImage = this.shadowRoot.getElementById("artImage");
 
     if (title) title.textContent = attrs.media_title || "Nothing playing";
     if (meta) {
@@ -1020,7 +1192,9 @@ class FamilyMusicCard extends HTMLElement {
     }
     if (volume && attrs.volume_level != null) {
       const actualPercent = Math.round(attrs.volume_level * 100);
-      volume.value = this._optimisticVolume(this._selectedPlayer, actualPercent);
+      const displayPercent = this._optimisticVolume(this._selectedPlayer, actualPercent);
+      volume.value = displayPercent;
+      if (volumeValue) volumeValue.textContent = String(displayPercent);
     }
     if (this._membersExpanded && this._groupMembersFor === this._selectedPlayer) {
       this._groupMembers.forEach((member) => {
@@ -1073,40 +1247,42 @@ class FamilyMusicCard extends HTMLElement {
     }
 
     const picture = attrs.entity_picture_local || attrs.entity_picture;
-    if (hero) {
-      let image = hero.querySelector(":scope > img.hero-image");
+    for (const image of [bgImage, artImage]) {
+      if (!image) continue;
       if (picture) {
-        if (!image) {
-          image = document.createElement("img");
-          image.className = "hero-image";
-          hero.prepend(image);
-        }
         if (image.getAttribute("src") !== picture) image.setAttribute("src", picture);
-      } else if (image) {
-        image.remove();
+        image.classList.add("visible");
+      } else {
+        image.removeAttribute("src");
+        image.classList.remove("visible");
       }
     }
+    const destinationName = this.shadowRoot.getElementById("destinationName");
+    if (destinationName) destinationName.textContent = this._selectedPlayerName();
+    if (this._moreOpen) this._renderNowOverlays();
   }
 
   _styles() {
     return `
       :host{display:block}*{box-sizing:border-box}button,input,select{font:inherit}
       .card{overflow:hidden;border-radius:22px;background:var(--card-background-color);color:var(--primary-text-color);border:1px solid var(--divider-color);font-family:var(--paper-font-body1_-_font-family,system-ui,sans-serif)}
-      .now-shell{min-height:640px;display:flex;flex-direction:column}.topbar{display:grid;grid-template-columns:minmax(0,1fr) 48px;gap:10px;align-items:center;padding:14px}
-      .player-select{width:100%;padding:12px 14px;border-radius:14px;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color);font-weight:700}
-      .circle-button{width:44px;height:44px;border-radius:50%;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color);display:flex;align-items:center;justify-content:center;cursor:pointer}
-      .search-button{width:48px;height:48px}.hero{position:relative;flex:1;min-height:530px;background:var(--secondary-background-color);overflow:hidden;display:flex;align-items:center;justify-content:center}
-      .hero-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero-placeholder ha-icon{--mdc-icon-size:84px;opacity:.28}.hero-shade{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.08),rgba(0,0,0,.18) 45%,rgba(0,0,0,.58))}
-      .track-card{position:absolute;left:16px;right:16px;top:16px;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.20);color:#fff;backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);border:1px solid rgba(255,255,255,.28);box-shadow:0 8px 26px rgba(0,0,0,.12);z-index:2;text-shadow:0 1px 3px rgba(0,0,0,.28)}
-      .track-title{font-size:23px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:3px;font-size:15px;color:rgba(255,255,255,.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .controls-card{position:absolute;left:16px;right:16px;bottom:16px;padding:10px 14px 11px;border-radius:18px;background:rgba(255,255,255,.18);color:#fff;backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);border:1px solid rgba(255,255,255,.26);box-shadow:0 8px 26px rgba(0,0,0,.12);z-index:2}
-      .transport{display:flex;align-items:center;justify-content:center;gap:16px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
-      .transport-button{width:40px;height:40px;background:transparent;color:rgba(255,255,255,.92)}.play-button{width:56px;height:56px;background:rgba(55,55,55,.62);color:#fff;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.play-button ha-icon{--mdc-icon-size:30px}.transport-button ha-icon{--mdc-icon-size:27px}
-      .progress-wrap{margin-top:6px}.progress-time{display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.82);margin-bottom:2px}.track-progress{width:100%;height:18px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,var(--primary-color) 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--primary-color);margin-top:-5px;box-shadow:0 0 0 2px rgba(255,255,255,.88);cursor:pointer}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(0,0,0,.14)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:var(--primary-color)}.track-progress::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:var(--primary-color)}
-      .volume-row{display:grid;grid-template-columns:34px 22px minmax(0,1fr) 22px;gap:4px;align-items:center;margin-top:4px}.volume{width:100%;height:18px;margin:0}.mute-toggle{width:34px;height:34px;border:0;background:transparent;color:rgba(255,255,255,.94);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(55,55,55,.62);color:#fff}.volume-nudge{width:22px;height:26px;border:0;background:transparent;color:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.volume-nudge ha-icon{--mdc-icon-size:17px}
-      .member-volume-panel{margin-top:2px;border-top:1px solid rgba(255,255,255,.18);padding-top:2px}.member-volume-toggle{width:100%;height:28px;padding:0 2px;border:0;background:transparent;color:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:700;cursor:pointer}.member-volume-toggle ha-icon{--mdc-icon-size:18px}.member-volume-row{display:grid;grid-template-columns:minmax(72px,1fr) minmax(110px,2fr) 34px;gap:8px;align-items:center;min-height:30px}.member-volume-name{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:rgba(255,255,255,.9)}.member-volume{width:100%;height:18px;margin:0}.member-volume-value{font-size:10px;text-align:right;color:rgba(255,255,255,.76)}.member-volume-empty{font-size:11px;color:rgba(255,255,255,.72);padding:5px 2px 3px}
-      .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
-      .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
+      .now-shell{min-height:700px;display:flex;flex-direction:column;background:#171513}
+      .hero{position:relative;min-height:700px;overflow:hidden;background:#171513;color:#fff}
+      .hero-bg{position:absolute;inset:-28px;width:calc(100% + 56px);height:calc(100% + 56px);object-fit:cover;filter:blur(34px) saturate(.72);transform:scale(1.08);opacity:0;transition:opacity .25s ease}.hero-bg.visible{opacity:.38}
+      .hero-shade{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(19,17,15,.56),rgba(19,17,15,.74) 54%,rgba(19,17,15,.92))}
+      .now-content{position:relative;z-index:2;min-height:700px;padding:24px 24px 20px;display:flex;flex-direction:column}
+      .artwork-stage{position:relative;width:min(82vw,430px);max-width:100%;aspect-ratio:1;margin:0 auto 22px;border-radius:24px;overflow:hidden;background:rgba(255,255,255,.08);box-shadow:0 16px 40px rgba(0,0,0,.28)}
+      .now-artwork{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:0;transition:opacity .2s ease}.now-artwork.visible{opacity:1}
+      .artwork-placeholder{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.28)}.artwork-placeholder ha-icon{--mdc-icon-size:76px}
+      .track-copy-main{min-width:0;margin-bottom:15px}.track-title{font-size:28px;line-height:1.12;font-weight:760;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:7px;font-size:17px;line-height:1.25;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .progress-wrap{margin-top:2px}.track-progress{width:100%;height:22px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,#fff 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(255,255,255,.34)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:#fff}.track-progress::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#fff}
+      .progress-time{display:flex;justify-content:space-between;font-size:13px;color:rgba(255,255,255,.56);margin-top:1px}
+      .transport{display:grid;grid-template-columns:1fr 76px 1fr;align-items:center;margin:15px 28px 14px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}
+      .volume-row{display:grid;grid-template-columns:38px 32px minmax(0,1fr) 34px 32px;gap:7px;align-items:center;margin:2px 0 18px}.volume{width:100%;height:24px;margin:0}.volume-value{font-size:15px;text-align:center;color:rgba(255,255,255,.68);font-variant-numeric:tabular-nums}.mute-toggle,.volume-nudge{border:0;background:transparent;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.mute-toggle{width:38px;height:38px;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(255,255,255,.14)}.volume-nudge{width:32px;height:32px;font-size:31px;font-weight:300;line-height:1}
+      .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
+      .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}.secondary-title{margin-top:20px}
+      .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}
+      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(120px,2fr) 34px;gap:9px;align-items:center;min-height:34px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
       .browser-title{font-size:23px;font-weight:800;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.provider-row{display:flex;gap:8px;flex-wrap:wrap;padding:14px 14px 0}
       .provider-chip{border:1px solid var(--divider-color);border-radius:999px;padding:9px 13px;background:var(--secondary-background-color);color:var(--secondary-text-color);font-weight:700;cursor:pointer}
@@ -1127,7 +1303,7 @@ class FamilyMusicCard extends HTMLElement {
       .album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
       .album-art{width:150px;height:150px;border-radius:18px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.album-art ha-icon{--mdc-icon-size:56px}
       .album-name{font-size:24px;font-weight:850}.album-artist{margin-top:5px;color:var(--secondary-text-color)}.album-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.album-actions button{height:42px;display:flex;align-items:center;gap:7px}
-      @media(max-width:600px){.now-shell,.browser-shell{min-height:560px}.hero{min-height:450px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:58px}}
+      @media(max-width:600px){.now-shell,.browser-shell{min-height:560px}.hero,.now-content{min-height:650px}.now-content{padding:18px 18px 16px}.artwork-stage{width:min(84vw,390px);margin-bottom:18px}.track-title{font-size:25px}.track-meta{font-size:15px}.transport{margin-left:16px;margin-right:16px}.bottom-actions{grid-template-columns:54px minmax(0,1fr) 54px}.bottom-circle{width:54px;height:54px}.destination-pill{height:54px;font-size:16px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:58px}}
     `;
   }
 
