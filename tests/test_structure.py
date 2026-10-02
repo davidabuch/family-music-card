@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.2.1"
+    assert manifest["version"] == "0.2.2"
     assert card_path.exists()
 
 
@@ -122,3 +122,21 @@ def test_glass_player_and_seekable_progress():
     assert "backdrop-filter:blur(22px) saturate(165%)" in card_text
     assert "background:rgba(255,255,255,.18)" in card_text
     assert "pointer-events:none" not in card_text
+
+
+
+def test_group_member_volume_controls():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert '"family_music/group_members"' in init_text
+    assert '"players/all"' in init_text
+    assert 'entry.platform == "music_assistant"' in init_text
+    assert '"group_members"' in init_text
+    assert 'id="memberVolumeHost"' in card_text
+    assert 'id="toggleMembers"' in card_text
+    assert 'class="member-volume"' in card_text
+    assert 'player_entity_id: player' in card_text
+    assert 'entity_id: entityId' in card_text
+    assert '"volume_set"' in card_text
