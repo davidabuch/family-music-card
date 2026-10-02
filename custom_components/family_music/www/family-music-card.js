@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.2.0";
+const CARD_VERSION = "0.2.1";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -22,6 +22,7 @@ class FamilyMusicCard extends HTMLElement {
     this._refreshTimer = null;
     this._refreshTick = 0;
     this._refreshInFlight = false;
+    this._seeking = false;
   }
 
   setConfig(config) {
@@ -631,6 +632,36 @@ class FamilyMusicCard extends HTMLElement {
         });
       }
     });
+    const progress = this.shadowRoot.getElementById("trackProgress");
+    progress?.addEventListener("input", (event) => {
+      this._seeking = true;
+      const duration = Number(progress.max || 0);
+      const position = Number(event.target.value || 0);
+      progress.style.setProperty(
+        "--progress-pct",
+        duration > 0 ? `${Math.min(100, (position / duration) * 100)}%` : "0%"
+      );
+      const elapsed = this.shadowRoot.getElementById("elapsed");
+      const remaining = this.shadowRoot.getElementById("remaining");
+      if (elapsed) elapsed.textContent = this._formatTime(position);
+      if (remaining) remaining.textContent = `-${this._formatTime(Math.max(0, duration - position))}`;
+    });
+    progress?.addEventListener("change", async (event) => {
+      if (!this._selectedPlayer) {
+        this._seeking = false;
+        return;
+      }
+      try {
+        await this._hass.callService("media_player", "media_seek", {
+          entity_id: this._selectedPlayer,
+          seek_position: Number(event.target.value || 0),
+        });
+      } finally {
+        this._seeking = false;
+        this._updateNowPlaying();
+      }
+    });
+
     this.shadowRoot.getElementById("muteToggle")?.addEventListener("click", () => {
       if (!this._selectedPlayer) return;
       const muted = Boolean(
@@ -791,7 +822,7 @@ class FamilyMusicCard extends HTMLElement {
 
     const duration = Number(attrs.media_duration);
     const position = this._estimatedPosition(state, attrs);
-    if (progress) {
+    if (progress && !this._seeking) {
       if (Number.isFinite(duration) && duration > 0) {
         progress.max = duration;
         progress.value = Math.min(position, duration);
@@ -838,13 +869,13 @@ class FamilyMusicCard extends HTMLElement {
       .circle-button{width:44px;height:44px;border-radius:50%;border:1px solid var(--divider-color);background:var(--secondary-background-color);color:var(--primary-text-color);display:flex;align-items:center;justify-content:center;cursor:pointer}
       .search-button{width:48px;height:48px}.hero{position:relative;flex:1;min-height:530px;background:var(--secondary-background-color);overflow:hidden;display:flex;align-items:center;justify-content:center}
       .hero-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.hero-placeholder ha-icon{--mdc-icon-size:84px;opacity:.28}.hero-shade{position:absolute;inset:0;background:linear-gradient(to bottom,rgba(0,0,0,.08),rgba(0,0,0,.18) 45%,rgba(0,0,0,.58))}
-      .track-card{position:absolute;left:16px;right:16px;top:16px;padding:15px 16px;border-radius:18px;background:rgba(255,255,255,.88);color:#222;backdrop-filter:blur(14px);z-index:2}
-      .track-title{font-size:23px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:4px;font-size:15px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-      .controls-card{position:absolute;left:16px;right:16px;bottom:16px;padding:14px;border-radius:18px;background:rgba(255,255,255,.9);color:#333;backdrop-filter:blur(14px);z-index:2}
-      .transport{display:flex;align-items:center;justify-content:center;gap:18px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
-      .transport-button{width:46px;height:46px;background:transparent;color:#444}.play-button{width:64px;height:64px;background:#666;color:#fff}.play-button ha-icon{--mdc-icon-size:34px}.transport-button ha-icon{--mdc-icon-size:29px}
-      .progress-wrap{margin-top:10px}.progress-time{display:flex;justify-content:space-between;font-size:11px;color:#666;margin-bottom:4px}.track-progress{width:100%;height:18px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;pointer-events:none}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,var(--primary-color) 0 var(--progress-pct,0%),rgba(0,0,0,.14) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--primary-color);margin-top:-4px;box-shadow:0 0 0 2px rgba(255,255,255,.85)}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(0,0,0,.14)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:var(--primary-color)}.track-progress::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:var(--primary-color)}
-      .volume-row{display:grid;grid-template-columns:34px 24px minmax(0,1fr) 24px;gap:5px;align-items:center;margin-top:6px}.volume{width:100%;height:18px;margin:0}.mute-toggle{width:34px;height:34px;border:0;background:transparent;color:#444;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:#666;color:#fff}.volume-nudge{width:24px;height:28px;border:0;background:transparent;color:#555;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.volume-nudge ha-icon{--mdc-icon-size:18px}
+      .track-card{position:absolute;left:16px;right:16px;top:16px;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.20);color:#fff;backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);border:1px solid rgba(255,255,255,.28);box-shadow:0 8px 26px rgba(0,0,0,.12);z-index:2;text-shadow:0 1px 3px rgba(0,0,0,.28)}
+      .track-title{font-size:23px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:3px;font-size:15px;color:rgba(255,255,255,.82);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .controls-card{position:absolute;left:16px;right:16px;bottom:16px;padding:10px 14px 11px;border-radius:18px;background:rgba(255,255,255,.18);color:#fff;backdrop-filter:blur(22px) saturate(165%);-webkit-backdrop-filter:blur(22px) saturate(165%);border:1px solid rgba(255,255,255,.26);box-shadow:0 8px 26px rgba(0,0,0,.12);z-index:2}
+      .transport{display:flex;align-items:center;justify-content:center;gap:16px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer}
+      .transport-button{width:40px;height:40px;background:transparent;color:rgba(255,255,255,.92)}.play-button{width:56px;height:56px;background:rgba(55,55,55,.62);color:#fff;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}.play-button ha-icon{--mdc-icon-size:30px}.transport-button ha-icon{--mdc-icon-size:27px}
+      .progress-wrap{margin-top:6px}.progress-time{display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,.82);margin-bottom:2px}.track-progress{width:100%;height:18px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,var(--primary-color) 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--primary-color);margin-top:-5px;box-shadow:0 0 0 2px rgba(255,255,255,.88);cursor:pointer}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(0,0,0,.14)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:var(--primary-color)}.track-progress::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:var(--primary-color)}
+      .volume-row{display:grid;grid-template-columns:34px 22px minmax(0,1fr) 22px;gap:4px;align-items:center;margin-top:4px}.volume{width:100%;height:18px;margin:0}.mute-toggle{width:34px;height:34px;border:0;background:transparent;color:rgba(255,255,255,.94);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(55,55,55,.62);color:#fff}.volume-nudge{width:22px;height:26px;border:0;background:transparent;color:rgba(255,255,255,.88);display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.volume-nudge ha-icon{--mdc-icon-size:17px}
       .nav-strip{height:72px;display:flex;align-items:center;justify-content:space-around;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto}
       .nav-button{min-width:64px;height:58px;border:0;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}.nav-button ha-icon{--mdc-icon-size:27px}.nav-button span{font-size:11px;font-weight:700}.nav-button.active{color:var(--primary-color)}
       .browser-shell{min-height:640px;display:flex;flex-direction:column}.browser-header{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--divider-color)}.header-actions{display:flex;gap:8px}
