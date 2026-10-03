@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.6"
+    assert manifest["version"] == "0.3.7"
     assert card_path.exists()
 
 
@@ -281,3 +281,42 @@ def test_card_frontend_uses_versioned_lovelace_resource():
     assert 'resources.async_update_item' in init_text
     assert 'resources.async_create_item' in init_text
     assert "frontend.add_extra_js_url" not in init_text
+
+
+
+def test_destination_picker_marks_playing_zones_with_animated_equalizer():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'playerState?.state === "playing"' in card_text
+    assert 'class="playing-equalizer"' in card_text
+    assert "<i></i><i></i><i></i>" in card_text
+    assert "@keyframes familyMusicEq" in card_text
+    assert "@media(prefers-reduced-motion:reduce)" in card_text
+
+
+def test_shuffle_and_repeat_live_in_main_transport_row():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'id="shuffleToggle"' in card_text
+    assert 'id="repeatToggle"' in card_text
+    assert "grid-template-columns:44px 1fr 76px 1fr 44px" in card_text
+    assert '"shuffle_set"' in card_text
+    assert '"repeat_set"' in card_text
+    assert '"mdi:repeat-once"' in card_text
+    assert 'id="moreShuffle"' not in card_text
+    assert 'id="moreRepeat"' not in card_text
+
+
+def test_three_dot_menu_is_group_control_only():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    more_menu = card_text.split("_renderMoreMenu() {", 1)[1].split(
+        "_renderNowOverlays()", 1
+    )[0]
+    assert "Speaker volumes" in more_menu
+    assert "Playback" not in more_menu
+    assert "Shuffle" not in more_menu
+    assert "Repeat:" not in more_menu
