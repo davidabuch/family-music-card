@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.5"
+    assert manifest["version"] == "0.3.6"
     assert card_path.exists()
 
 
@@ -266,3 +266,18 @@ def test_music_search_icon_is_round_and_full_bleed():
     assert 'class="music-search-icon"' in card_text
     assert ".music-search-icon{width:100%;height:100%" in card_text
     assert ".music-search-button{overflow:hidden;padding:0;background:transparent}" in card_text
+
+
+
+def test_card_frontend_uses_versioned_lovelace_resource():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    manifest = json.loads(
+        (ROOT / "custom_components" / "family_music" / "manifest.json").read_text()
+    )
+    assert "lovelace" in manifest["dependencies"]
+    assert "ResourceStorageCollection" in init_text
+    assert "await resources.async_get_info()" in init_text
+    assert 'resource_url = f"{CARD_URL}?v={VERSION}"' in init_text
+    assert 'resources.async_update_item' in init_text
+    assert 'resources.async_create_item' in init_text
+    assert "frontend.add_extra_js_url" not in init_text
