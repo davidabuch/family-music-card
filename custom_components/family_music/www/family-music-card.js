@@ -35,6 +35,10 @@ class FamilyMusicCard extends HTMLElement {
     this._moreOpen = false;
     this._speechRecognition = null;
     this._dictating = false;
+    this._optimisticShuffle = null;
+    this._optimisticShuffleUntil = 0;
+    this._optimisticRepeat = null;
+    this._optimisticRepeatUntil = 0;
   }
 
   setConfig(config) {
@@ -152,12 +156,20 @@ class FamilyMusicCard extends HTMLElement {
     const players = (this._config?.players || [])
       .filter((entityId) => this._hass?.states?.[entityId])
       .map((entityId) => {
-        const name = this._hass.states[entityId]?.attributes?.friendly_name || entityId;
+        const playerState = this._hass.states[entityId];
+        const name = playerState?.attributes?.friendly_name || entityId;
         const selected = entityId === this._selectedPlayer;
+        const playing = playerState?.state === "playing";
+        const activity = playing
+          ? `<span class="playing-equalizer" title="Playing" aria-label="Playing">
+              <i></i><i></i><i></i>
+            </span>`
+          : '<span class="destination-activity" aria-hidden="true"></span>';
         return `
           <button class="destination-option ${selected ? "selected" : ""}" data-destination="${this._escape(entityId)}">
             <ha-icon icon="${selected ? "mdi:check-circle" : "mdi:speaker"}"></ha-icon>
             <span>${this._escape(name)}</span>
+            ${activity}
           </button>
         `;
       })
@@ -205,21 +217,9 @@ class FamilyMusicCard extends HTMLElement {
       `
       : '<div class="menu-status">This destination is a single speaker.</div>';
 
-    const attrs = this._hass?.states?.[this._selectedPlayer]?.attributes || {};
-    const repeat = attrs.repeat || "off";
-    const shuffled = Boolean(attrs.shuffle);
     return `
       <div class="now-popover more-popover">
         ${groupSection}
-        <div class="popover-section-title secondary-title">Playback</div>
-        <div class="more-actions">
-          <button id="moreShuffle" class="more-action ${shuffled ? "active" : ""}">
-            <ha-icon icon="mdi:shuffle"></ha-icon><span>Shuffle</span>
-          </button>
-          <button id="moreRepeat" class="more-action ${repeat !== "off" ? "active" : ""}">
-            <ha-icon icon="mdi:repeat"></ha-icon><span>Repeat: ${this._escape(repeat)}</span>
-          </button>
-        </div>
       </div>
     `;
   }
@@ -259,25 +259,12 @@ class FamilyMusicCard extends HTMLElement {
         this._moreOpen = false;
         this._optimisticPlayback = null;
         this._optimisticPlaybackUntil = 0;
+        this._optimisticShuffle = null;
+        this._optimisticShuffleUntil = 0;
+        this._optimisticRepeat = null;
+        this._optimisticRepeatUntil = 0;
         localStorage.setItem("family-music-card-player", entityId);
         this._render();
-      });
-    });
-    this.shadowRoot.getElementById("moreShuffle")?.addEventListener("click", () => {
-      if (!this._selectedPlayer) return;
-      const current = Boolean(this._hass?.states?.[this._selectedPlayer]?.attributes?.shuffle);
-      this._hass.callService("media_player", "shuffle_set", {
-        entity_id: this._selectedPlayer,
-        shuffle: !current,
-      });
-    });
-    this.shadowRoot.getElementById("moreRepeat")?.addEventListener("click", () => {
-      if (!this._selectedPlayer) return;
-      const current = this._hass?.states?.[this._selectedPlayer]?.attributes?.repeat || "off";
-      const next = current === "off" ? "all" : current === "all" ? "one" : "off";
-      this._hass.callService("media_player", "repeat_set", {
-        entity_id: this._selectedPlayer,
-        repeat: next,
       });
     });
     this._wireMemberVolumePanel();
@@ -602,9 +589,15 @@ class FamilyMusicCard extends HTMLElement {
             </div>
 
             <div class="transport">
+              <button id="shuffleToggle" class="mode-button" aria-label="Shuffle" title="Shuffle">
+                <ha-icon icon="mdi:shuffle"></ha-icon>
+              </button>
               <button id="prev" class="transport-button" aria-label="Previous"><ha-icon icon="mdi:skip-previous"></ha-icon></button>
               <button id="playPause" class="play-button" aria-label="Play or pause"><ha-icon icon="mdi:play"></ha-icon></button>
               <button id="next" class="transport-button" aria-label="Next"><ha-icon icon="mdi:skip-next"></ha-icon></button>
+              <button id="repeatToggle" class="mode-button" aria-label="Repeat" title="Repeat off">
+                <ha-icon icon="mdi:repeat"></ha-icon>
+              </button>
             </div>
 
             <div class="volume-row">
@@ -648,7 +641,7 @@ class FamilyMusicCard extends HTMLElement {
                 <span id="destinationName">${this._escape(playerName)}</span>
                 <ha-icon class="destination-chevron" icon="mdi:chevron-up"></ha-icon>
               </button>
-              <button id="moreButton" class="bottom-circle" title="Group and playback options" aria-label="More options">
+              <button id="moreButton" class="bottom-circle" title="Speaker group controls" aria-label="Speaker group controls">
                 <ha-icon icon="mdi:dots-horizontal"></ha-icon>
               </button>
             </div>
@@ -993,6 +986,10 @@ class FamilyMusicCard extends HTMLElement {
       this._membersExpanded = false;
       this._optimisticPlayback = null;
       this._optimisticPlaybackUntil = 0;
+      this._optimisticShuffle = null;
+      this._optimisticShuffleUntil = 0;
+      this._optimisticRepeat = null;
+      this._optimisticRepeatUntil = 0;
       localStorage.setItem("family-music-card-player", this._selectedPlayer);
       this._updateNowPlaying();
       this._loadGroupMembers(false);
@@ -1021,6 +1018,55 @@ class FamilyMusicCard extends HTMLElement {
     this.shadowRoot.getElementById("navNow")?.addEventListener("click", () => this._setView("now"));
     this.shadowRoot.getElementById("navRecents")?.addEventListener("click", () => this._openRecents());
     this.shadowRoot.getElementById("navFavorites")?.addEventListener("click", () => this._openFavorites());
+
+    this.shadowRoot.getElementById("shuffleToggle")?.addEventListener("click", () => {
+      if (!this._selectedPlayer) return;
+      const attrs = this._hass?.states?.[this._selectedPlayer]?.attributes || {};
+      const effective =
+        this._optimisticShuffle !== null && Date.now() < this._optimisticShuffleUntil
+          ? this._optimisticShuffle
+          : Boolean(attrs.shuffle);
+      const next = !effective;
+      this._optimisticShuffle = next;
+      this._optimisticShuffleUntil = Date.now() + 2500;
+      const button = this.shadowRoot.getElementById("shuffleToggle");
+      button?.classList.toggle("active", next);
+      this._hass.callService("media_player", "shuffle_set", {
+        entity_id: this._selectedPlayer,
+        shuffle: next,
+      }).catch(() => {
+        this._optimisticShuffle = null;
+        this._optimisticShuffleUntil = 0;
+        this._updateNowPlaying();
+      });
+    });
+
+    this.shadowRoot.getElementById("repeatToggle")?.addEventListener("click", () => {
+      if (!this._selectedPlayer) return;
+      const attrs = this._hass?.states?.[this._selectedPlayer]?.attributes || {};
+      const effective =
+        this._optimisticRepeat !== null && Date.now() < this._optimisticRepeatUntil
+          ? this._optimisticRepeat
+          : attrs.repeat || "off";
+      const next = effective === "off" ? "all" : effective === "all" ? "one" : "off";
+      this._optimisticRepeat = next;
+      this._optimisticRepeatUntil = Date.now() + 2500;
+      const button = this.shadowRoot.getElementById("repeatToggle");
+      if (button) {
+        button.classList.toggle("active", next !== "off");
+        button.title = next === "one" ? "Repeat one" : next === "all" ? "Repeat all" : "Repeat off";
+        button.setAttribute("aria-label", button.title);
+        button.innerHTML = `<ha-icon icon="${next === "one" ? "mdi:repeat-once" : "mdi:repeat"}"></ha-icon>`;
+      }
+      this._hass.callService("media_player", "repeat_set", {
+        entity_id: this._selectedPlayer,
+        repeat: next,
+      }).catch(() => {
+        this._optimisticRepeat = null;
+        this._optimisticRepeatUntil = 0;
+        this._updateNowPlaying();
+      });
+    });
 
     this.shadowRoot.getElementById("prev")?.addEventListener("click", () => {
       if (this._selectedPlayer) {
@@ -1293,6 +1339,8 @@ class FamilyMusicCard extends HTMLElement {
     const volumeValue = this.shadowRoot.getElementById("volumeValue");
     const bgImage = this.shadowRoot.getElementById("bgImage");
     const artImage = this.shadowRoot.getElementById("artImage");
+    const shuffleToggle = this.shadowRoot.getElementById("shuffleToggle");
+    const repeatToggle = this.shadowRoot.getElementById("repeatToggle");
 
     if (title) title.textContent = attrs.media_title || "Nothing playing";
     if (meta) {
@@ -1313,6 +1361,41 @@ class FamilyMusicCard extends HTMLElement {
           : state.state;
       playPause.innerHTML = `<ha-icon icon="${playbackState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
     }
+    if (shuffleToggle) {
+      if (
+        this._optimisticShuffle !== null &&
+        (Date.now() >= this._optimisticShuffleUntil ||
+          Boolean(attrs.shuffle) === this._optimisticShuffle)
+      ) {
+        this._optimisticShuffle = null;
+        this._optimisticShuffleUntil = 0;
+      }
+      const shuffleState =
+        this._optimisticShuffle !== null && Date.now() < this._optimisticShuffleUntil
+          ? this._optimisticShuffle
+          : Boolean(attrs.shuffle);
+      shuffleToggle.classList.toggle("active", shuffleState);
+    }
+    if (repeatToggle) {
+      const actualRepeat = attrs.repeat || "off";
+      if (
+        this._optimisticRepeat !== null &&
+        (Date.now() >= this._optimisticRepeatUntil || actualRepeat === this._optimisticRepeat)
+      ) {
+        this._optimisticRepeat = null;
+        this._optimisticRepeatUntil = 0;
+      }
+      const repeatState =
+        this._optimisticRepeat !== null && Date.now() < this._optimisticRepeatUntil
+          ? this._optimisticRepeat
+          : actualRepeat;
+      repeatToggle.classList.toggle("active", repeatState !== "off");
+      repeatToggle.title =
+        repeatState === "one" ? "Repeat one" : repeatState === "all" ? "Repeat all" : "Repeat off";
+      repeatToggle.setAttribute("aria-label", repeatToggle.title);
+      repeatToggle.innerHTML = `<ha-icon icon="${repeatState === "one" ? "mdi:repeat-once" : "mdi:repeat"}"></ha-icon>`;
+    }
+
     if (volume && attrs.volume_level != null) {
       const actualPercent = Math.round(attrs.volume_level * 100);
       const displayPercent = this._optimisticVolume(this._selectedPlayer, actualPercent);
@@ -1400,12 +1483,12 @@ class FamilyMusicCard extends HTMLElement {
       .track-copy-main{min-width:0;margin-bottom:15px}.track-title{font-size:28px;line-height:1.12;font-weight:760;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:7px;font-size:17px;line-height:1.25;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .progress-wrap{margin-top:2px}.track-progress{width:100%;height:22px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,#fff 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(255,255,255,.34)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:#fff}.track-progress::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#fff}
       .progress-time{display:flex;justify-content:space-between;font-size:13px;color:rgba(255,255,255,.56);margin-top:1px}
-      .transport{display:grid;grid-template-columns:1fr 76px 1fr;align-items:center;margin:15px 28px 14px}.transport-button,.play-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}
+      .transport{display:grid;grid-template-columns:44px 1fr 76px 1fr 44px;align-items:center;gap:2px;margin:15px 4px 14px}.transport-button,.play-button,.mode-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}.mode-button{width:44px;height:44px;background:transparent;justify-self:center;color:rgba(255,255,255,.48)}.mode-button ha-icon{--mdc-icon-size:25px}.mode-button.active{color:#fff;background:rgba(255,255,255,.10)}
       .volume-row{display:grid;grid-template-columns:38px 32px minmax(0,1fr) 34px 32px;gap:7px;align-items:center;margin:2px 0 18px}.volume{width:100%;height:24px;margin:0}.volume-value{font-size:15px;text-align:center;color:rgba(255,255,255,.68);font-variant-numeric:tabular-nums}.mute-toggle,.volume-nudge{border:0;background:transparent;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.mute-toggle{width:38px;height:38px;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(255,255,255,.14)}.volume-nudge{width:32px;height:32px;font-size:31px;font-weight:300;line-height:1}
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden;padding:0;background:transparent}.music-search-icon{width:100%;height:100%;display:block;border-radius:50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
-      .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}.secondary-title{margin-top:20px}
-      .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}
-      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}.more-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.more-action{min-height:48px;border:1px solid rgba(255,255,255,.14);border-radius:14px;background:rgba(255,255,255,.06);color:#fff;display:flex;gap:8px;align-items:center;justify-content:center;font-weight:700;cursor:pointer}.more-action.active{background:rgba(255,255,255,.16)}
+      .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}
+      .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 28px;gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}.destination-activity{width:28px;height:22px}.playing-equalizer{width:28px;height:22px;display:flex;align-items:flex-end;justify-content:center;gap:3px}.playing-equalizer i{display:block;width:3px;height:7px;border-radius:999px;background:currentColor;transform-origin:center bottom;animation:familyMusicEq 760ms ease-in-out infinite alternate}.playing-equalizer i:nth-child(2){height:15px;animation-duration:560ms;animation-delay:-210ms}.playing-equalizer i:nth-child(3){height:10px;animation-duration:690ms;animation-delay:-390ms}@keyframes familyMusicEq{0%{transform:scaleY(.35);opacity:.55}100%{transform:scaleY(1);opacity:1}}@media(prefers-reduced-motion:reduce){.playing-equalizer i{animation:none}}
+      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
       .nav-strip{height:78px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto;padding:4px 8px 6px;gap:4px}
       .nav-button{min-width:0;width:100%;height:64px;border:0;border-radius:14px;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:0}
       .nav-button ha-icon{--mdc-icon-size:26px}.nav-button span{font-size:11px;font-weight:700;white-space:nowrap}.nav-button.active{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}
