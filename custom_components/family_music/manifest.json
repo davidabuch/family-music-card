@@ -8,11 +8,12 @@
   "dependencies": [
     "frontend",
     "http",
+    "lovelace",
     "music_assistant"
   ],
   "documentation": "https://github.com/davidabuch/family-music-card",
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/davidabuch/family-music-card/issues",
-  "version": "0.3.5"
+  "version": "0.3.6"
 }
