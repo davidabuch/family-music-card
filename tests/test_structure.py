@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.7"
+    assert manifest["version"] == "0.3.8"
     assert card_path.exists()
 
 
@@ -168,11 +168,11 @@ def test_now_playing_bottom_action_model():
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
     assert 'id="openSearch"' in card_text
-    assert 'icon="mdi:magnify"' in card_text
+    assert 'class="music-search-icon"' in card_text
     assert 'id="destinationButton"' in card_text
     assert "Change playback destination" in card_text
     assert 'id="moreButton"' in card_text
-    assert 'icon="mdi:dots-horizontal"' in card_text
+    assert 'icon="mdi:speaker-multiple"' in card_text
     assert "_renderDestinationMenu()" in card_text
     assert "_renderMoreMenu()" in card_text
     assert "Play in" in card_text
@@ -251,8 +251,8 @@ def test_now_playing_uses_music_search_icon():
     assert 'class="bottom-circle music-search-button"' in card_text
     assert 'class="music-search-icon"' in card_text
     assert 'id="musicSearchGradient"' in card_text
-    assert 'class="music-search-note"' in card_text
-    assert 'class="music-search-capsule"' in card_text
+    assert 'class="music-search-note"' not in card_text
+    assert 'class="music-search-capsule"' not in card_text
     search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
     assert 'icon="mdi:magnify"' not in search_button
 
@@ -320,3 +320,29 @@ def test_three_dot_menu_is_group_control_only():
     assert "Playback" not in more_menu
     assert "Shuffle" not in more_menu
     assert "Repeat:" not in more_menu
+
+
+
+def test_search_music_button_uses_clean_red_search_icon():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
+    assert 'title="Search music"' in search_button
+    assert 'class="music-search-icon"' in search_button
+    assert 'stroke="#fff"' in search_button
+    assert 'music-search-note' not in search_button
+    assert 'music-search-capsule' not in search_button
+
+
+def test_group_speaker_button_replaces_three_dots_and_disables_for_single_zone():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert 'class="bottom-circle group-speakers-button"' in card_text
+    assert 'icon="mdi:speaker-multiple"' in card_text
+    assert 'icon="mdi:dots-horizontal"' not in card_text
+    assert 'if (!this._isSelectedGroup()) return;' in card_text
+    assert 'moreButton.disabled = !grouped' in card_text
+    assert 'Single speaker — no group controls' in card_text
+    assert '.group-speakers-button:disabled' in card_text
