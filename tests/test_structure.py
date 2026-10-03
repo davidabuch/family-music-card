@@ -168,11 +168,11 @@ def test_now_playing_bottom_action_model():
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
     assert 'id="openSearch"' in card_text
-    assert 'icon="mdi:magnify"' in card_text
+    assert 'class="music-search-icon"' in card_text
     assert 'id="destinationButton"' in card_text
     assert "Change playback destination" in card_text
     assert 'id="moreButton"' in card_text
-    assert 'icon="mdi:dots-horizontal"' in card_text
+    assert 'icon="mdi:speaker-multiple"' in card_text
     assert "_renderDestinationMenu()" in card_text
     assert "_renderMoreMenu()" in card_text
     assert "Play in" in card_text
@@ -251,8 +251,8 @@ def test_now_playing_uses_music_search_icon():
     assert 'class="bottom-circle music-search-button"' in card_text
     assert 'class="music-search-icon"' in card_text
     assert 'id="musicSearchGradient"' in card_text
-    assert 'class="music-search-note"' in card_text
-    assert 'class="music-search-capsule"' in card_text
+    assert 'class="music-search-note"' not in card_text
+    assert 'class="music-search-capsule"' not in card_text
     search_button = card_text.split('id="openSearch"', 1)[1].split("</button>", 1)[0]
     assert 'icon="mdi:magnify"' not in search_button
 
