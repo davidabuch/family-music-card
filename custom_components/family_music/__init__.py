@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components import frontend, websocket_api
+from homeassistant.components import websocket_api
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.resources import ResourceStorageCollection
 from homeassistant.components.music_assistant.helpers import get_music_assistant_client
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -535,6 +536,37 @@ async def ws_album_tracks(hass: HomeAssistant, connection, msg: dict) -> None:
     )
 
 
+async def _async_register_card_resource(hass: HomeAssistant) -> None:
+    """Ensure the Family Music card is a versioned Lovelace module resource."""
+    lovelace_data = hass.data.get("lovelace")
+    if lovelace_data is None:
+        return
+
+    resources = getattr(lovelace_data, "resources", None)
+    if resources is None:
+        return
+
+    if isinstance(resources, ResourceStorageCollection):
+        await resources.async_get_info()
+
+    resource_url = f"{CARD_URL}?v={VERSION}"
+    for item in resources.async_items():
+        existing_url = str(item.get("url") or "")
+        if existing_url.split("?", 1)[0] != CARD_URL:
+            continue
+        if existing_url == resource_url:
+            return
+        await resources.async_update_item(
+            item["id"],
+            {"res_type": "module", "url": resource_url},
+        )
+        return
+
+    await resources.async_create_item(
+        {"res_type": "module", "url": resource_url}
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Family Music."""
     if not hass.data.setdefault(DOMAIN, {}).get("registered"):
@@ -542,7 +574,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARD_URL, str(card_path), cache_headers=False)]
         )
-        frontend.add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+        await _async_register_card_resource(hass)
         websocket_api.async_register_command(hass, ws_search)
         websocket_api.async_register_command(hass, ws_group_members)
         websocket_api.async_register_command(hass, ws_recents)
