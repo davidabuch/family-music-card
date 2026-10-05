@@ -388,6 +388,42 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "family_music/player_peers",
+        vol.Required("config_entry_id"): str,
+        vol.Required("player_entity_ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_player_peers(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Return native Sonos peers for Music Assistant media_player entities."""
+    registry = er.async_get(hass)
+    native_by_unique_id = {
+        entry.unique_id: entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player"
+        and entry.platform == "sonos"
+        and isinstance(entry.unique_id, str)
+    }
+
+    peers: dict[str, str] = {}
+    for entity_id in msg["player_entity_ids"]:
+        entry = registry.async_get(entity_id)
+        if (
+            entry is None
+            or entry.domain != "media_player"
+            or entry.platform != "music_assistant"
+            or not isinstance(entry.unique_id, str)
+        ):
+            continue
+        native_entity_id = native_by_unique_id.get(entry.unique_id)
+        if native_entity_id:
+            peers[entity_id] = native_entity_id
+
+    connection.send_result(msg["id"], peers)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "family_music/recents",
         vol.Required("config_entry_id"): str,
         vol.Required("queue_id"): str,
@@ -577,6 +613,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _async_register_card_resource(hass)
         websocket_api.async_register_command(hass, ws_search)
         websocket_api.async_register_command(hass, ws_group_members)
+        websocket_api.async_register_command(hass, ws_player_peers)
         websocket_api.async_register_command(hass, ws_recents)
         websocket_api.async_register_command(hass, ws_favorites)
         websocket_api.async_register_command(hass, ws_artist_albums)
