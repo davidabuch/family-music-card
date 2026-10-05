@@ -288,7 +288,7 @@ def test_destination_picker_marks_playing_zones_with_animated_equalizer():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
-    assert 'playerState?.state === "playing"' in card_text
+    assert "_destinationIsPlaying(entityId)" in card_text
     assert 'class="playing-equalizer"' in card_text
     assert "<i></i><i></i><i></i>" in card_text
     assert "@keyframes familyMusicEq" in card_text
