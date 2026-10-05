@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.8"
+    assert manifest["version"] == "0.3.9"
     assert card_path.exists()
 
 
@@ -346,3 +346,25 @@ def test_group_speaker_button_replaces_three_dots_and_disables_for_single_zone()
     assert 'moreButton.disabled = !grouped' in card_text
     assert 'Single speaker — no group controls' in card_text
     assert '.group-speakers-button:disabled' in card_text
+
+
+
+def test_player_peer_mapping_uses_shared_sonos_unique_id():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    assert '"family_music/player_peers"' in init_text
+    assert 'entry.platform == "sonos"' in init_text
+    assert 'entry.platform != "music_assistant"' in init_text
+    assert 'native_by_unique_id.get(entry.unique_id)' in init_text
+    assert 'websocket_api.async_register_command(hass, ws_player_peers)' in init_text
+
+
+def test_playing_indicator_checks_ma_and_native_sonos_states():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "_nativePlayerPeers = {}" in card_text
+    assert 'this._ws("family_music/player_peers"' in card_text
+    assert "_destinationIsPlaying(entityId)" in card_text
+    assert 'this._hass?.states?.[entityId]?.state === "playing"' in card_text
+    assert 'this._hass?.states?.[nativeEntityId]?.state === "playing"' in card_text
+    assert "return maPlaying || nativePlaying" in card_text
