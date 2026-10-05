@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.8";
+const CARD_VERSION = "0.3.9";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -39,6 +39,8 @@ class FamilyMusicCard extends HTMLElement {
     this._optimisticShuffleUntil = 0;
     this._optimisticRepeat = null;
     this._optimisticRepeatUntil = 0;
+    this._nativePlayerPeers = {};
+    this._nativePeerLoadInFlight = false;
   }
 
   setConfig(config) {
@@ -65,6 +67,7 @@ class FamilyMusicCard extends HTMLElement {
         this._config.players[0];
     }
     this._syncPlayerSelector();
+    this._loadNativePlayerPeers();
     this._updateNowPlaying();
   }
 
@@ -151,6 +154,39 @@ class FamilyMusicCard extends HTMLElement {
     );
   }
 
+  async _loadNativePlayerPeers() {
+    if (
+      this._nativePeerLoadInFlight ||
+      !this._hass ||
+      !this._config?.config_entry_id ||
+      !Array.isArray(this._config?.players)
+    ) {
+      return;
+    }
+    this._nativePeerLoadInFlight = true;
+    try {
+      const peers = await this._ws("family_music/player_peers", {
+        player_entity_ids: this._config.players,
+      });
+      this._nativePlayerPeers =
+        peers && typeof peers === "object" && !Array.isArray(peers) ? peers : {};
+      if (this._destinationOpen) this._renderNowOverlays();
+    } catch (_error) {
+      this._nativePlayerPeers = {};
+    } finally {
+      this._nativePeerLoadInFlight = false;
+    }
+  }
+
+  _destinationIsPlaying(entityId) {
+    const maPlaying = this._hass?.states?.[entityId]?.state === "playing";
+    const nativeEntityId = this._nativePlayerPeers?.[entityId];
+    const nativePlaying = nativeEntityId
+      ? this._hass?.states?.[nativeEntityId]?.state === "playing"
+      : false;
+    return maPlaying || nativePlaying;
+  }
+
   _renderDestinationMenu() {
     if (!this._destinationOpen) return "";
     const players = (this._config?.players || [])
@@ -159,7 +195,7 @@ class FamilyMusicCard extends HTMLElement {
         const playerState = this._hass.states[entityId];
         const name = playerState?.attributes?.friendly_name || entityId;
         const selected = entityId === this._selectedPlayer;
-        const playing = playerState?.state === "playing";
+        const playing = this._destinationIsPlaying(entityId);
         const activity = playing
           ? `<span class="playing-equalizer" title="Playing" aria-label="Playing">
               <i></i><i></i><i></i>
