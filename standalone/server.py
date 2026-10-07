@@ -298,6 +298,19 @@ class Handler(BaseHTTPRequestHandler):
                 result = client.command(command, queue_id=queue_id)
                 self._send_json({"ok": True, "result": result})
                 return
+            if path == "/api/mute":
+                player_id = str(body.get("player_id") or "")
+                muted = body.get("muted")
+                if not player_id or not isinstance(muted, bool):
+                    self._send_json({"error": "invalid player_id or muted"}, HTTPStatus.BAD_REQUEST)
+                    return
+                result = client.command(
+                    "players/cmd/volume_mute",
+                    player_id=player_id,
+                    muted=muted,
+                )
+                self._send_json({"ok": True, "result": result})
+                return
             if path == "/api/volume":
                 player_id = str(body.get("player_id") or "")
                 level = int(body.get("level"))
