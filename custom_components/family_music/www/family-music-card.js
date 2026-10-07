@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.9";
+const CARD_VERSION = "0.3.10";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -39,6 +39,8 @@ class FamilyMusicCard extends HTMLElement {
     this._optimisticShuffleUntil = 0;
     this._optimisticRepeat = null;
     this._optimisticRepeatUntil = 0;
+    this._optimisticMute = null;
+    this._optimisticMuteUntil = 0;
     this._nativePlayerPeers = {};
     this._nativePeerLoadInFlight = false;
   }
@@ -299,6 +301,8 @@ class FamilyMusicCard extends HTMLElement {
         this._optimisticShuffleUntil = 0;
         this._optimisticRepeat = null;
         this._optimisticRepeatUntil = 0;
+        this._optimisticMute = null;
+        this._optimisticMuteUntil = 0;
         localStorage.setItem("family-music-card-player", entityId);
         this._render();
       });
@@ -350,7 +354,8 @@ class FamilyMusicCard extends HTMLElement {
       ? this._groupMembers.map((member) => {
           const state = this._hass?.states?.[member.entity_id];
           const volume = state?.attributes?.volume_level;
-          const value = volume == null ? 0 : Math.round(volume * 100);
+          const actualPercent = volume == null ? 0 : Math.round(volume * 100);
+          const value = this._optimisticVolume(member.entity_id, actualPercent);
           const disabled = !member.available || !state ? "disabled" : "";
           return `
             <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
@@ -400,13 +405,15 @@ class FamilyMusicCard extends HTMLElement {
         const row = event.target.closest(".member-volume-row");
         const display = row?.querySelector(".member-volume-value");
         if (display) display.textContent = `${Math.round(value)}%`;
-        this._queueVolumeWrite(entityId, value, false);
+        const member = this._groupMembers.find((item) => item.entity_id === entityId);
+        this._queueVolumeWrite(entityId, value, false, member?.native_entity_id || entityId);
       });
       slider.addEventListener("change", (event) => {
         const entityId = event.target.dataset.entity;
         if (!entityId) return;
         const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
-        this._queueVolumeWrite(entityId, value, true);
+        const member = this._groupMembers.find((item) => item.entity_id === entityId);
+        this._queueVolumeWrite(entityId, value, true, member?.native_entity_id || entityId);
       });
     });
     this.shadowRoot.querySelectorAll(".member-volume-nudge").forEach((button) => {
@@ -421,7 +428,8 @@ class FamilyMusicCard extends HTMLElement {
         if (slider) slider.value = next;
         const display = row?.querySelector(".member-volume-value");
         if (display) display.textContent = String(next);
-        this._queueVolumeWrite(entityId, next, true);
+        const member = this._groupMembers.find((item) => item.entity_id === entityId);
+        this._queueVolumeWrite(entityId, next, true, member?.native_entity_id || entityId);
       });
     });
   }
@@ -943,24 +951,26 @@ class FamilyMusicCard extends HTMLElement {
     return bounded;
   }
 
-  _queueVolumeWrite(entityId, percent, flush = false) {
-    if (!entityId || !this._hass) return;
+  _queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId) {
+    if (!entityId || !targetEntityId || !this._hass) return;
     const bounded = this._setOptimisticVolume(entityId, percent);
     let pending = this._volumeWrites.get(entityId);
     if (!pending) {
-      pending = { timer: null, lastSent: 0, pendingValue: null };
+      pending = { timer: null, lastSent: 0, pendingValue: null, targetEntityId };
       this._volumeWrites.set(entityId, pending);
     }
     pending.pendingValue = bounded;
+    pending.targetEntityId = targetEntityId;
 
     const send = () => {
       if (pending.timer) clearTimeout(pending.timer);
       pending.timer = null;
       const value = pending.pendingValue;
+      const target = pending.targetEntityId;
       pending.pendingValue = null;
       pending.lastSent = Date.now();
       this._hass.callService("media_player", "volume_set", {
-        entity_id: entityId,
+        entity_id: target,
         volume_level: value / 100,
       }).catch(() => {
         this._optimisticVolumes.delete(entityId);
@@ -969,12 +979,12 @@ class FamilyMusicCard extends HTMLElement {
     };
 
     const elapsed = Date.now() - pending.lastSent;
-    if (flush || pending.lastSent === 0 || elapsed >= 60) {
+    if (flush || pending.lastSent === 0 || elapsed >= 35) {
       send();
       return;
     }
     if (!pending.timer) {
-      pending.timer = setTimeout(send, Math.max(0, 60 - elapsed));
+      pending.timer = setTimeout(send, Math.max(0, 35 - elapsed));
     }
   }
 
@@ -999,7 +1009,8 @@ class FamilyMusicCard extends HTMLElement {
     if (slider) slider.value = bounded;
     const display = this.shadowRoot.getElementById("volumeValue");
     if (display) display.textContent = String(bounded);
-    this._queueVolumeWrite(this._selectedPlayer, bounded, flush);
+    const target = this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer;
+    this._queueVolumeWrite(this._selectedPlayer, bounded, flush, target);
   }
 
   _wire() {
@@ -1015,6 +1026,8 @@ class FamilyMusicCard extends HTMLElement {
       this._optimisticShuffleUntil = 0;
       this._optimisticRepeat = null;
       this._optimisticRepeatUntil = 0;
+      this._optimisticMute = null;
+      this._optimisticMuteUntil = 0;
       localStorage.setItem("family-music-card-player", this._selectedPlayer);
       this._updateNowPlaying();
       this._loadGroupMembers(false);
@@ -1160,12 +1173,31 @@ class FamilyMusicCard extends HTMLElement {
 
     this.shadowRoot.getElementById("muteToggle")?.addEventListener("click", () => {
       if (!this._selectedPlayer) return;
-      const muted = Boolean(
+      const actualMuted = Boolean(
         this._hass?.states?.[this._selectedPlayer]?.attributes?.is_volume_muted
       );
+      const effectiveMuted =
+        this._optimisticMute !== null && Date.now() < this._optimisticMuteUntil
+          ? this._optimisticMute
+          : actualMuted;
+      const nextMuted = !effectiveMuted;
+      this._optimisticMute = nextMuted;
+      this._optimisticMuteUntil = Date.now() + 2500;
+      const button = this.shadowRoot.getElementById("muteToggle");
+      if (button) {
+        button.title = nextMuted ? "Unmute" : "Mute";
+        button.setAttribute("aria-label", button.title);
+        button.innerHTML = `<ha-icon icon="${nextMuted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>`;
+        button.classList.toggle("muted", nextMuted);
+      }
+      const target = this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer;
       this._hass.callService("media_player", "volume_mute", {
-        entity_id: this._selectedPlayer,
-        is_volume_muted: !muted,
+        entity_id: target,
+        is_volume_muted: nextMuted,
+      }).catch(() => {
+        this._optimisticMute = null;
+        this._optimisticMuteUntil = 0;
+        this._updateNowPlaying();
       });
     });
     this.shadowRoot.getElementById("volume")?.addEventListener("input", (event) => {
@@ -1461,7 +1493,17 @@ class FamilyMusicCard extends HTMLElement {
       });
     }
     if (muteToggle) {
-      const muted = Boolean(attrs.is_volume_muted);
+      const actualMuted = Boolean(attrs.is_volume_muted);
+      if (this._optimisticMute !== null) {
+        if (actualMuted === this._optimisticMute || Date.now() >= this._optimisticMuteUntil) {
+          this._optimisticMute = null;
+          this._optimisticMuteUntil = 0;
+        }
+      }
+      const muted =
+        this._optimisticMute !== null && Date.now() < this._optimisticMuteUntil
+          ? this._optimisticMute
+          : actualMuted;
       muteToggle.title = muted ? "Unmute" : "Mute";
       muteToggle.setAttribute("aria-label", muted ? "Unmute" : "Mute");
       muteToggle.innerHTML = `<ha-icon icon="${muted ? "mdi:volume-off" : "mdi:volume-high"}"></ha-icon>`;
