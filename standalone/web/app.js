@@ -467,6 +467,7 @@ function renderBalanceOverlay() {
 }
 
 function wire() {
+  document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
   document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>n.classList.toggle("active",n===button));}));
   $("#searchButton").addEventListener("click", runSearch);

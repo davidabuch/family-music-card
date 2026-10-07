@@ -116,7 +116,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.2"' in app_config
+    assert 'version: "0.2.3"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -182,7 +182,10 @@ def test_standalone_card_parity_controls():
 def test_standalone_primary_tabbar_is_present():
     index = (ROOT / "standalone" / "web" / "index.html").read_text()
     styles = (ROOT / "standalone" / "web" / "styles.css").read_text()
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
     for view in ("now", "recents", "favorites", "search"):
         assert ('data-view="' + view + '"') in index
     assert 'class="tabbar"' in index
     assert ".tabbar{" in styles
+    assert index.count('class="tabbar"') == 1
+    assert "button.dataset.view" in app_js

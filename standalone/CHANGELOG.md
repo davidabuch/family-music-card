@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Fix the restored bottom navigation so Now, Recents, Favorites, and Search are actually clickable.
+- Remove duplicate tab-bar markup and duplicate tab-bar CSS introduced by the 0.2.2 fix.
+- Add regression coverage for one tab bar only and working tab navigation wiring.
+
 ## 0.2.2
 
 - Restore the persistent Now, Recents, Favorites, and Search navigation bar lost during the HA-card parity redesign.
