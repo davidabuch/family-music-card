@@ -352,6 +352,13 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
         for entry in registry.entities.values()
         if entry.domain == "media_player" and entry.platform == "music_assistant"
     }
+    native_by_unique_id = {
+        entry.unique_id: entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player"
+        and entry.platform == "sonos"
+        and isinstance(entry.unique_id, str)
+    }
     player_by_id = {
         player.get("player_id"): player
         for player in players
@@ -377,6 +384,7 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
         members.append(
             {
                 "entity_id": entity_id,
+                "native_entity_id": native_by_unique_id.get(player_id),
                 "player_id": player_id,
                 "name": friendly_name,
                 "available": state is not None and state.state != "unavailable",
