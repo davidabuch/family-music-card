@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.12";
+const CARD_VERSION = "0.3.13";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -45,6 +45,8 @@ class FamilyMusicCard extends HTMLElement {
     this._optimisticMuteUntil = 0;
     this._nativePlayerPeers = {};
     this._nativePeerLoadInFlight = false;
+    this._pendingPlayUri = null;
+    this._pendingPlayName = null;
   }
 
   setConfig(config) {
@@ -496,14 +498,55 @@ class FamilyMusicCard extends HTMLElement {
 
   async _play(item, enqueue = "play") {
     if (!this._selectedPlayer || !item?.uri) return;
-    await this._hass.callService("music_assistant", "play_media", {
-      entity_id: this._selectedPlayer,
-      media_id: item.uri,
-      media_type: item.media_type || "track",
-      enqueue,
-    });
-    this._view = "now";
-    this._render();
+    this._pendingPlayUri = item.uri;
+    this._pendingPlayName = item.name || "Selection";
+    this._markPendingSelection(item.uri, this._pendingPlayName);
+    try {
+      await this._hass.callService("music_assistant", "play_media", {
+        entity_id: this._selectedPlayer,
+        media_id: item.uri,
+        media_type: item.media_type || "track",
+        enqueue,
+      });
+      this._view = "now";
+      this._render();
+    } catch (error) {
+      this._clearPendingSelection(item.uri, error?.message || "Unable to start playback");
+      throw error;
+    } finally {
+      this._pendingPlayUri = null;
+      this._pendingPlayName = null;
+    }
+  }
+
+  _markPendingSelection(uri, name) {
+    const selector = `[data-uri="${CSS.escape(uri)}"]`;
+    const button = this.shadowRoot.querySelector(selector);
+    if (!button) return;
+    button.classList.add("starting");
+    button.setAttribute("aria-busy", "true");
+    let feedback = button.querySelector(".selection-feedback");
+    if (!feedback) {
+      feedback = document.createElement("span");
+      feedback.className = "selection-feedback";
+      button.appendChild(feedback);
+    }
+    feedback.innerHTML = '<ha-icon icon="mdi:loading"></ha-icon><span>Starting…</span>';
+    button.title = `Starting ${name}`;
+  }
+
+  _clearPendingSelection(uri, message = "") {
+    const selector = `[data-uri="${CSS.escape(uri)}"]`;
+    const button = this.shadowRoot.querySelector(selector);
+    if (!button) return;
+    button.classList.remove("starting");
+    button.removeAttribute("aria-busy");
+    const feedback = button.querySelector(".selection-feedback");
+    if (feedback) {
+      feedback.innerHTML = message
+        ? `<ha-icon icon="mdi:alert-circle-outline"></ha-icon><span>${this._escape(message)}</span>`
+        : "";
+    }
   }
 
   async _playAlbum(shuffle = false) {
@@ -992,6 +1035,24 @@ class FamilyMusicCard extends HTMLElement {
     return pending.value;
   }
 
+  _skipTrack(direction) {
+    if (!this._selectedPlayer || !this._hass) return;
+    const buttonId = direction === "next" ? "next" : "prev";
+    const service = direction === "next" ? "media_next_track" : "media_previous_track";
+    const target = this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer;
+    const button = this.shadowRoot.getElementById(buttonId);
+    button?.classList.add("accepted");
+    button?.setAttribute("aria-busy", "true");
+    window.setTimeout(() => {
+      button?.classList.remove("accepted");
+      button?.removeAttribute("aria-busy");
+    }, 500);
+    this._hass.callService("media_player", service, { entity_id: target }).catch(() => {
+      button?.classList.remove("accepted");
+      button?.removeAttribute("aria-busy");
+    });
+  }
+
   _setVolume(percent, flush = false) {
     if (!this._selectedPlayer) return;
     const bounded = this._setOptimisticVolume(this._selectedPlayer, percent);
@@ -1102,14 +1163,10 @@ class FamilyMusicCard extends HTMLElement {
     });
 
     this.shadowRoot.getElementById("prev")?.addEventListener("click", () => {
-      if (this._selectedPlayer) {
-        this._hass.callService("media_player", "media_previous_track", { entity_id: this._selectedPlayer });
-      }
+      this._skipTrack("previous");
     });
     this.shadowRoot.getElementById("next")?.addEventListener("click", () => {
-      if (this._selectedPlayer) {
-        this._hass.callService("media_player", "media_next_track", { entity_id: this._selectedPlayer });
-      }
+      this._skipTrack("next");
     });
     this.shadowRoot.getElementById("playPause")?.addEventListener("click", () => {
       if (!this._selectedPlayer) return;
@@ -1540,7 +1597,7 @@ class FamilyMusicCard extends HTMLElement {
       .track-copy-main{min-width:0;margin-bottom:15px}.track-title{font-size:28px;line-height:1.12;font-weight:760;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-meta{margin-top:7px;font-size:17px;line-height:1.25;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .progress-wrap{margin-top:2px}.track-progress{width:100%;height:22px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;cursor:pointer}.track-progress::-webkit-slider-runnable-track{height:4px;border-radius:999px;background:linear-gradient(to right,#fff 0 var(--progress-pct,0%),rgba(255,255,255,.34) var(--progress-pct,0%) 100%)}.track-progress::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 1px rgba(0,0,0,.1)}.track-progress::-moz-range-track{height:4px;border-radius:999px;background:rgba(255,255,255,.34)}.track-progress::-moz-range-progress{height:4px;border-radius:999px;background:#fff}.track-progress::-moz-range-thumb{width:14px;height:14px;border:0;border-radius:50%;background:#fff}
       .progress-time{display:flex;justify-content:space-between;font-size:13px;color:rgba(255,255,255,.56);margin-top:1px}
-      .transport{display:grid;grid-template-columns:44px 1fr 76px 1fr 44px;align-items:center;gap:2px;margin:15px 4px 14px}.transport-button,.play-button,.mode-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}.mode-button{width:44px;height:44px;background:transparent;justify-self:center;color:rgba(255,255,255,.48)}.mode-button ha-icon{--mdc-icon-size:25px}.mode-button.active{color:#fff;background:rgba(255,255,255,.10)}
+      .transport{display:grid;grid-template-columns:44px 1fr 76px 1fr 44px;align-items:center;gap:2px;margin:15px 4px 14px}.transport-button,.play-button,.mode-button{border:0;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff}.transport-button{width:54px;height:54px;background:transparent;justify-self:center}.transport-button ha-icon{--mdc-icon-size:38px}.transport-button.accepted{background:rgba(255,255,255,.16);transform:scale(.94)}.play-button{width:76px;height:76px;background:rgba(255,255,255,.10);justify-self:center;box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.play-button ha-icon{--mdc-icon-size:42px}.mode-button{width:44px;height:44px;background:transparent;justify-self:center;color:rgba(255,255,255,.48)}.mode-button ha-icon{--mdc-icon-size:25px}.mode-button.active{color:#fff;background:rgba(255,255,255,.10)}
       .volume-row{display:grid;grid-template-columns:38px 32px minmax(0,1fr) 34px 32px;gap:7px;align-items:center;margin:2px 0 18px}.volume{width:100%;height:24px;margin:0}.volume-value{font-size:15px;text-align:center;color:rgba(255,255,255,.68);font-variant-numeric:tabular-nums}.mute-toggle,.volume-nudge{border:0;background:transparent;color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.mute-toggle{width:38px;height:38px;border-radius:50%}.mute-toggle ha-icon{--mdc-icon-size:25px}.mute-toggle.muted{background:rgba(255,255,255,.14)}.volume-nudge{width:32px;height:32px;font-size:31px;font-weight:300;line-height:1}
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden;padding:0;background:transparent}.music-search-icon{width:100%;height:100%;display:block;border-radius:50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.group-speakers-button ha-icon{--mdc-icon-size:31px}.group-speakers-button:disabled,.group-speakers-button.disabled{opacity:.28;cursor:default;filter:grayscale(1)}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}
@@ -1565,7 +1622,7 @@ class FamilyMusicCard extends HTMLElement {
       .track-row:hover{background:var(--secondary-background-color)}.track-index{color:var(--secondary-text-color);text-align:center}.track-thumb{width:50px;height:50px;border-radius:10px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}
       .track-copy{min-width:0}.track-row-title{font-weight:750;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.track-row-subtitle{font-size:12px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .track-source{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}
-      .recent-list{display:flex;flex-direction:column;gap:6px}.recent-row{width:100%;display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:11px;align-items:center;border:0;border-radius:14px;background:transparent;color:var(--primary-text-color);padding:7px;text-align:left;cursor:pointer}.recent-row:hover{background:var(--secondary-background-color)}.recent-thumb{width:58px;height:58px;border-radius:12px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.recent-thumb img{width:100%;height:100%;object-fit:cover}.recent-copy{min-width:0}.recent-title{font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-subtitle{margin-top:3px;font-size:12px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-type{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}
+      .recent-list{display:flex;flex-direction:column;gap:6px}.recent-row{width:100%;display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:11px;align-items:center;border:0;border-radius:14px;background:transparent;color:var(--primary-text-color);padding:7px;text-align:left;cursor:pointer}.recent-row.starting,.media-tile.starting,.track-row.starting{position:relative;outline:2px solid color-mix(in srgb,var(--primary-color) 65%,transparent);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}.selection-feedback{position:absolute;right:10px;top:10px;display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;background:rgba(0,0,0,.72);color:#fff;font-size:11px;font-weight:700;z-index:3}.selection-feedback ha-icon{--mdc-icon-size:16px}.starting .selection-feedback ha-icon{animation:familyMusicSpin .8s linear infinite}@keyframes familyMusicSpin{to{transform:rotate(360deg)}}.recent-row:hover{background:var(--secondary-background-color)}.recent-thumb{width:58px;height:58px;border-radius:12px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.recent-thumb img{width:100%;height:100%;object-fit:cover}.recent-copy{min-width:0}.recent-title{font-weight:780;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-subtitle{margin-top:3px;font-size:12px;color:var(--secondary-text-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recent-type{font-size:10px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:4px 7px}
       .album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
       .album-art{width:150px;height:150px;border-radius:18px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.album-art ha-icon{--mdc-icon-size:56px}
       .album-name{font-size:24px;font-weight:850}.album-artist{margin-top:5px;color:var(--secondary-text-color)}.album-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.album-actions button{height:42px;display:flex;align-items:center;gap:7px}
