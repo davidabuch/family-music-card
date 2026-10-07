@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.11"
+    assert manifest["version"] == "0.3.12"
     assert card_path.exists()
 
 
@@ -416,17 +416,18 @@ def test_mute_is_optimistic_true_toggle_with_muted_icon():
 
 
 
-def test_group_balance_slider_has_large_touch_target():
+def test_group_balance_slider_matches_native_volume_thumb_and_keeps_touch_target():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
     assert ".member-trim{width:100%;height:46px" in card_text
-    assert "width:30px;height:30px" in card_text
     assert ".member-balance-row{display:grid" in card_text
     assert "min-height:58px" in card_text
     assert ".member-trim{height:52px}" in card_text
-    assert "width:34px;height:34px" in card_text
     assert "touch-action:pan-y" in card_text
+    assert ".member-trim::-webkit-slider-thumb" not in card_text
+    assert ".member-trim::-moz-range-thumb" not in card_text
+    assert ".member-trim::-webkit-slider-runnable-track" not in card_text
 
 
 def test_same_balance_model_is_used_for_every_group_size():
