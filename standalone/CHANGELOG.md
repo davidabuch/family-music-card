@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.5
+
+- Hide the persistent bottom navigation while speaker selection or Speaker Balance overlays are open so it can never cover selectable rows or controls.
+- Restore the navigation immediately when the overlay closes.
+
 ## 0.2.4
 
 - Align the persistent Now/Recents/Favorites/Search bar to the same centered footprint as the player instead of spanning the full browser width.
