@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Fix Home Assistant Supervisor Web UI placeholder syntax for App Store discovery.
+
 ## 0.1.0
 
 - Initial standalone Family Music PWA.
