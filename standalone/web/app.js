@@ -419,12 +419,14 @@ function closeOverlay() {
   state.balanceOpen = false;
   $("#overlay").classList.remove("open");
   $("#overlay").innerHTML = "";
+  $(".tabbar")?.classList.remove("overlay-hidden");
 }
 
 function renderDestinationOverlay() {
   state.destinationOpen = true; state.balanceOpen = false;
   const options = state.players.map((p) => `<button class="destination-option ${p.player_id===state.selectedPlayerId?"selected":""}" data-player="${escapeHtml(p.player_id)}"><span>${p.type==="group"?"▣":"◉"}</span><span>${escapeHtml(playerName(p))}</span><span class="check">${p.player_id===state.selectedPlayerId?"●":""}</span></button>`).join("");
   $("#overlay").classList.add("open");
+  $(".tabbar")?.classList.add("overlay-hidden");
   $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Play in</h3>${options}</div>`;
   $(".scrim").addEventListener("click", closeOverlay);
   document.querySelectorAll("[data-player]").forEach((button) => button.addEventListener("click", () => {
@@ -450,6 +452,7 @@ function renderBalanceOverlay() {
       '<div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div><button id="resetBalance" class="reset-balance">Reset balance</button>';
   }
   $("#overlay").classList.add("open");
+  $(".tabbar")?.classList.add("overlay-hidden");
   $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Speaker Balance</h3>${body}</div>`;
   $(".scrim").addEventListener("click", closeOverlay);
   document.querySelectorAll(".member-trim").forEach((slider) => {
