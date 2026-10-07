@@ -438,3 +438,18 @@ def test_same_balance_model_is_used_for_every_group_size():
     assert "Speaker Balance" in card_text
     assert "groupMembers.length === 2" not in card_text
     assert "groupMembers.length >= 4" not in card_text
+
+
+
+def test_open_balance_panel_is_not_rebuilt_on_every_state_update():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    update_block = card_text.split("  _updateNowPlaying() {", 1)[1].split(
+        "  _styles() {", 1
+    )[0]
+    assert "_renderNowOverlays()" not in update_block
+    assert (
+        'this._selectedPlayer === player && this._moreOpen'
+        in card_text
+    )
