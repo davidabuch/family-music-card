@@ -159,7 +159,16 @@ def test_standalone_card_parity_controls():
     app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
     server = (ROOT / "standalone" / "server.py").read_text()
 
-    for element_id in ("progress", "shuffle", "repeat", "volumeDown", "volumeUp", "destination", "more", "openSearch"):
+    for element_id in (
+        "progress",
+        "shuffle",
+        "repeat",
+        "volumeDown",
+        "volumeUp",
+        "destination",
+        "more",
+        "openSearch",
+    ):
         assert f'id="{element_id}"' in index
     assert 'player?.type === "group" ? player?.group_volume : player?.volume_level' in app_js
     assert 'renderDestinationOverlay' in app_js
