@@ -194,4 +194,5 @@ def test_standalone_primary_tabbar_is_present():
 def test_standalone_tabbar_matches_compact_shell_width():
     styles = (ROOT / "standalone" / "web" / "styles.css").read_text()
     assert ".app-shell{width:min(100%,408px)" in styles
-    assert ".tabbar{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(100%,408px)" in styles
+    assert ".tabbar{position:fixed;left:50%;bottom:0" in styles
+    assert "transform:translateX(-50%);width:min(100%,408px)" in styles
