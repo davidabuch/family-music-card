@@ -306,11 +306,17 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
                     return
                 if action == "seek":
-                    result = client.command(\n                        "player_queues/seek", queue_id=queue_id, position=int(value)\n                    )
+                    result = client.command(
+                        "player_queues/seek", queue_id=queue_id, position=int(value)
+                    )
                 elif action == "shuffle" and isinstance(value, bool):
-                    result = client.command(\n                        "player_queues/shuffle", queue_id=queue_id, shuffle_enabled=value\n                    )
+                    result = client.command(
+                        "player_queues/shuffle", queue_id=queue_id, shuffle_enabled=value
+                    )
                 elif action == "repeat" and value in {"off", "all", "one"}:
-                    result = client.command(\n                        "player_queues/repeat", queue_id=queue_id, repeat_mode=value\n                    )
+                    result = client.command(
+                        "player_queues/repeat", queue_id=queue_id, repeat_mode=value
+                    )
                 else:
                     self._send_json({"error": "invalid queue control"}, HTTPStatus.BAD_REQUEST)
                     return
