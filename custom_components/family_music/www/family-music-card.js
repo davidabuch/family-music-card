@@ -1468,24 +1468,6 @@ class FamilyMusicCard extends HTMLElement {
       volume.value = displayPercent;
       if (volumeValue) volumeValue.textContent = String(displayPercent);
     }
-    if ((this._membersExpanded || this._moreOpen) && this._groupMembersFor === this._selectedPlayer) {
-      this._groupMembers.forEach((member) => {
-        const memberState = this._hass.states[member.entity_id];
-        const memberVolume = memberState?.attributes?.volume_level;
-        if (memberVolume == null) return;
-        const slider = this.shadowRoot.querySelector(
-          `.member-volume[data-entity="${CSS.escape(member.entity_id)}"]`
-        );
-        if (slider && document.activeElement !== slider) {
-          const actualPercent = Math.round(memberVolume * 100);
-          const displayPercent = this._optimisticVolume(member.entity_id, actualPercent);
-          slider.value = displayPercent;
-          const row = slider.closest(".member-volume-row");
-          const display = row?.querySelector(".member-volume-value");
-          if (display) display.textContent = `${displayPercent}%`;
-        }
-      });
-    }
     if (muteToggle) {
       const actualMuted = Boolean(attrs.is_volume_muted);
       if (this._optimisticMute !== null) {
