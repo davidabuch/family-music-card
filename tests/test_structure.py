@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.9"
+    assert manifest["version"] == "0.3.10"
     assert card_path.exists()
 
 
@@ -156,7 +156,7 @@ def test_optimistic_responsive_media_controls():
     assert "this._optimisticVolumes = new Map()" in card_text
     assert "this._volumeWrites = new Map()" in card_text
     assert "_queueVolumeWrite(entityId, percent, flush = false)" in card_text
-    assert "elapsed >= 60" in card_text
+    assert "elapsed >= 35" in card_text
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
     assert "Date.now() + 5000" in card_text
@@ -208,7 +208,7 @@ def test_volume_drag_coalescing_is_faster():
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
     assert "elapsed >= 60" in card_text
-    assert "Math.max(0, 60 - elapsed)" in card_text
+    assert "Math.max(0, 35 - elapsed)" in card_text
 
 
 
@@ -368,3 +368,34 @@ def test_playing_indicator_checks_ma_and_native_sonos_states():
     assert 'this._hass?.states?.[entityId]?.state === "playing"' in card_text
     assert 'this._hass?.states?.[nativeEntityId]?.state === "playing"' in card_text
     assert "return maPlaying || nativePlaying" in card_text
+
+
+
+def test_group_members_expose_native_sonos_volume_target():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    assert "native_by_unique_id" in init_text
+    assert '"native_entity_id": native_by_unique_id.get(player_id)' in init_text
+
+
+def test_volume_writes_can_target_native_sonos_without_losing_optimistic_key():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "_queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId)" in card_text
+    assert "entity_id: target" in card_text
+    assert "member?.native_entity_id || entityId" in card_text
+    assert "this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer" in card_text
+    assert "elapsed >= 35" in card_text
+
+
+def test_mute_is_optimistic_true_toggle_with_muted_icon():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "this._optimisticMute = null" in card_text
+    assert "this._optimisticMuteUntil = 0" in card_text
+    assert "const effectiveMuted =" in card_text
+    assert "const nextMuted = !effectiveMuted" in card_text
+    assert 'nextMuted ? "mdi:volume-off" : "mdi:volume-high"' in card_text
+    assert 'muted ? "mdi:volume-off" : "mdi:volume-high"' in card_text
+    assert "actualMuted === this._optimisticMute" in card_text
