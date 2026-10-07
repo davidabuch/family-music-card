@@ -105,3 +105,23 @@ def test_pwa_is_installable_and_has_immediate_feedback():
     assert 'className = "feedback"' in app_js
     assert "Starting…" in app_js
     assert 'classList.add("accepted")' in app_js
+
+
+
+def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
+    repo_config = (ROOT / "repository.yaml").read_text()
+    app_config = (ROOT / "standalone" / "config.yaml").read_text()
+    dockerfile = (ROOT / "standalone" / "Dockerfile").read_text()
+    run_script = (ROOT / "standalone" / "run.sh").read_text()
+
+    assert "name: Family Music" in repo_config
+    assert 'version: "0.1.0"' in app_config
+    assert "host_network: true" in app_config
+    assert "http://127.0.0.1:8095" in app_config
+    assert "ma_token: password" in app_config
+    assert "homeassistant_api" not in app_config
+    assert "hassio_api" not in app_config
+    assert "FROM python:3.13-alpine" in dockerfile
+    assert "BUILD_FROM" not in dockerfile
+    assert "MA_URL" in run_script
+    assert "MA_TOKEN" in run_script
