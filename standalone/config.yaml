@@ -1,0 +1,23 @@
+name: Family Music
+version: "0.1.0"
+slug: family_music
+description: Standalone Family Music PWA backed directly by Music Assistant.
+url: https://github.com/davidabuch/family-music-card
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+host_network: true
+webui: http://[HOST]:8099
+watchdog: http://[HOST]:8099/api/health
+stage: experimental
+options:
+  ma_url: http://127.0.0.1:8095
+  ma_token: null
+  player_ids: ""
+schema:
+  ma_url: url
+  ma_token: password
+  player_ids: str
