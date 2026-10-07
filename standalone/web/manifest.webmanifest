@@ -1,0 +1,17 @@
+{
+  "name": "Family Music",
+  "short_name": "Music",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111111",
+  "theme_color": "#171513",
+  "description": "Family-friendly Music Assistant controller",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
