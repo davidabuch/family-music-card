@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Reduce the standalone Now Playing footprint by about 20% so the complete player fits comfortably within the screen.
+
 ## 0.2.0
 
 - Rebuild standalone Now Playing to mirror the Home Assistant Family Music card.
