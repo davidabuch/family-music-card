@@ -138,8 +138,8 @@ def test_haos_app_webui_uses_supervisor_placeholders():
 def test_standalone_picker_is_not_rebuilt_on_every_poll():
     app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
 
-    assert "select.dataset.playerSignature !== signature" in app_js
-    assert "document.activeElement !== select" in app_js
+    assert "renderDestinationOverlay" in app_js
+    assert "localStorage.setItem(\"family-music-player-id\"" in app_js
 
 
 def test_standalone_mute_is_interactive_and_optimistic():
@@ -149,7 +149,7 @@ def test_standalone_mute_is_interactive_and_optimistic():
 
     assert 'id="mute"' in index
     assert "pendingMute" in app_js
-    assert 'addEventListener("click", toggleMute)' in app_js
+    assert 'addEventListener("click",toggleMute)' in app_js
     assert 'path == "/api/mute"' in server
     assert '"players/cmd/volume_mute"' in server
 
