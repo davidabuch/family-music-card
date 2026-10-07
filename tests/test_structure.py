@@ -326,7 +326,7 @@ def test_three_dot_menu_is_group_control_only():
     more_menu = card_text.split("_renderMoreMenu() {", 1)[1].split(
         "_renderNowOverlays()", 1
     )[0]
-    assert "Speaker volumes" in more_menu
+    assert "Speaker Balance" in more_menu
     assert "Playback" not in more_menu
     assert "Shuffle" not in more_menu
     assert "Repeat:" not in more_menu
@@ -448,7 +448,8 @@ def test_open_balance_panel_is_not_rebuilt_on_every_state_update():
     update_block = card_text.split("  _updateNowPlaying() {", 1)[1].split(
         "  _styles() {", 1
     )[0]
-    assert "_renderNowOverlays()" not in update_block
+    assert 'if (this._moreOpen) this._renderNowOverlays();' not in update_block
+    assert ".member-volume" not in update_block
     assert (
         'this._selectedPlayer === player && this._moreOpen'
         in card_text
