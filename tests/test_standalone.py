@@ -93,6 +93,7 @@ def test_pwa_keeps_token_out_of_browser_assets():
     assert "/api/play" in app_js
     assert "/api/transport" in app_js
     assert "/api/volume" in app_js
+    assert "/api/mute" in app_js
 
 
 def test_pwa_is_installable_and_has_immediate_feedback():
@@ -115,7 +116,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.1.1"' in app_config
+    assert 'version: "0.1.2"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -132,3 +133,22 @@ def test_haos_app_webui_uses_supervisor_placeholders():
     app_config = (ROOT / "standalone" / "config.yaml").read_text()
     assert 'webui: "[PROTO:http]://[HOST]:[PORT:8099]"' in app_config
     assert "webui: http://[HOST]:8099" not in app_config
+
+
+def test_standalone_picker_is_not_rebuilt_on_every_poll():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+
+    assert "select.dataset.playerSignature !== signature" in app_js
+    assert "document.activeElement !== select" in app_js
+
+
+def test_standalone_mute_is_interactive_and_optimistic():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    server = (ROOT / "standalone" / "server.py").read_text()
+
+    assert 'id="mute"' in index
+    assert "pendingMute" in app_js
+    assert 'addEventListener("click", toggleMute)' in app_js
+    assert 'path == "/api/mute"' in server
+    assert '"players/cmd/volume_mute"' in server

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Keep the speaker picker stable during live polling.
+- Add real optimistic mute/unmute control through Music Assistant.
+
 ## 0.1.1
 
 - Fix Home Assistant Supervisor Web UI placeholder syntax for App Store discovery.
