@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- Rebuild standalone Now Playing to mirror the Home Assistant Family Music card.
+- Add seek/progress, shuffle, repeat, volume nudges, destination picker, and group Speaker Balance.
+- Use Music Assistant group volume for grouped destinations while preserving direct MA control.
+
 ## 0.1.2
 
 - Keep the speaker picker stable during live polling.

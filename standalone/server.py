@@ -298,6 +298,30 @@ class Handler(BaseHTTPRequestHandler):
                 result = client.command(command, queue_id=queue_id)
                 self._send_json({"ok": True, "result": result})
                 return
+            if path == "/api/queue-control":
+                queue_id = str(body.get("queue_id") or "")
+                action = str(body.get("action") or "")
+                value = body.get("value")
+                if not queue_id:
+                    self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                if action == "seek":
+                    result = client.command(
+                        "player_queues/seek", queue_id=queue_id, position=int(value)
+                    )
+                elif action == "shuffle" and isinstance(value, bool):
+                    result = client.command(
+                        "player_queues/shuffle", queue_id=queue_id, shuffle_enabled=value
+                    )
+                elif action == "repeat" and value in {"off", "all", "one"}:
+                    result = client.command(
+                        "player_queues/repeat", queue_id=queue_id, repeat_mode=value
+                    )
+                else:
+                    self._send_json({"error": "invalid queue control"}, HTTPStatus.BAD_REQUEST)
+                    return
+                self._send_json({"ok": True, "result": result})
+                return
             if path == "/api/mute":
                 player_id = str(body.get("player_id") or "")
                 muted = body.get("muted")
