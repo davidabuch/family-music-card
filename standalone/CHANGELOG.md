@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.4
+
+- Align the persistent Now/Recents/Favorites/Search bar to the same centered footprint as the player instead of spanning the full browser width.
+- Reduce the player footprint another ~9% so the whole control surface fits more comfortably on-screen.
+- Tighten vertical spacing while preserving the existing interaction targets and functionality.
+
 ## 0.2.3
 
 - Fix the restored bottom navigation so Now, Recents, Favorites, and Search are actually clickable.
