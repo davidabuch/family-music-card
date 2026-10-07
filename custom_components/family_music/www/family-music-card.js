@@ -340,9 +340,8 @@ class FamilyMusicCard extends HTMLElement {
       }
     } finally {
       this._groupMembersLoading = false;
-      if (this._view === "now" && this._selectedPlayer === player) {
-        this._renderMemberVolumePanel();
-    
+      if (this._view === "now" && this._selectedPlayer === player && this._moreOpen) {
+        this._renderNowOverlays();
       }
     }
   }
@@ -1542,7 +1541,6 @@ class FamilyMusicCard extends HTMLElement {
     }
     const destinationName = this.shadowRoot.getElementById("destinationName");
     if (destinationName) destinationName.textContent = this._selectedPlayerName();
-    if (this._moreOpen) this._renderNowOverlays();
   }
 
   _styles() {
