@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Restore the persistent Now, Recents, Favorites, and Search navigation bar lost during the HA-card parity redesign.
+- Keep navigation above the iPhone safe area while preserving the compact player footprint.
+
 ## 0.2.1
 
 - Reduce the standalone Now Playing footprint by about 20% so the complete player fits comfortably within the screen.
