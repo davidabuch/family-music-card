@@ -187,3 +187,5 @@ def test_standalone_primary_tabbar_is_present():
         assert ('data-view="' + view + '"') in index
     assert 'class="tabbar"' in index
     assert ".tabbar{" in styles
+    assert index.count('class="tabbar"') == 1
+    assert "button.dataset.view" in app_js
