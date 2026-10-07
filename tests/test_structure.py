@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.10"
+    assert manifest["version"] == "0.3.11"
     assert card_path.exists()
 
 
@@ -129,7 +129,7 @@ def test_sonos_inspired_now_playing_and_seekable_progress():
 
 
 
-def test_group_member_volume_controls_live_in_more_menu():
+def test_group_member_balance_controls_live_in_more_menu():
     init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
@@ -139,8 +139,13 @@ def test_group_member_volume_controls_live_in_more_menu():
     assert 'entry.platform == "music_assistant"' in init_text
     assert '"group_members"' in init_text
     assert 'id="moreButton"' in card_text
-    assert "Speaker volumes" in card_text
-    assert 'class="member-volume"' in card_text
+    assert "Speaker Balance" in card_text
+    assert "No percentages to manage." in card_text
+    assert 'class="member-trim"' in card_text
+    assert 'min="-12" max="12" step="1"' in card_text
+    assert "Less" in card_text
+    assert "Neutral" in card_text
+    assert "More" in card_text
     assert 'player_entity_id: player' in card_text
     assert 'entity_id: target' in card_text
     assert '"volume_set"' in card_text
@@ -194,17 +199,18 @@ def test_main_volume_keeps_mute_and_one_point_nudges():
 
 
 
-def test_group_member_volume_rows_have_one_point_nudges():
+def test_group_balance_uses_relative_trim_not_percent_math():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
-    assert 'class="member-volume-nudge member-volume-down"' in card_text
-    assert 'class="member-volume-nudge member-volume-up"' in card_text
-    assert 'data-delta="-1"' in card_text
-    assert 'data-delta="1"' in card_text
-    assert "current + delta" in card_text
+    assert "this._mixBaselinePercent = null" in card_text
+    assert "this._memberTrimValues = new Map()" in card_text
+    assert "_initializeSpeakerBalance()" in card_text
+    assert "(percent - this._mixBaselinePercent) / 2" in card_text
+    assert "baseline + Number(trim || 0) * 2" in card_text
     assert "member?.native_entity_id || entityId" in card_text
-    assert "_queueVolumeWrite(entityId, next, true," in card_text
+    assert 'id="resetSpeakerBalance"' in card_text
+    assert "_resetSpeakerBalance()" in card_text
 
 
 def test_volume_drag_coalescing_is_faster():
@@ -320,7 +326,7 @@ def test_three_dot_menu_is_group_control_only():
     more_menu = card_text.split("_renderMoreMenu() {", 1)[1].split(
         "_renderNowOverlays()", 1
     )[0]
-    assert "Speaker volumes" in more_menu
+    assert "Speaker Balance" in more_menu
     assert "Playback" not in more_menu
     assert "Shuffle" not in more_menu
     assert "Repeat:" not in more_menu
@@ -407,3 +413,44 @@ def test_mute_is_optimistic_true_toggle_with_muted_icon():
     assert 'nextMuted ? "mdi:volume-off" : "mdi:volume-high"' in card_text
     assert 'muted ? "mdi:volume-off" : "mdi:volume-high"' in card_text
     assert "actualMuted === this._optimisticMute" in card_text
+
+
+
+def test_group_balance_slider_has_large_touch_target():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert ".member-trim{width:100%;height:46px" in card_text
+    assert "width:30px;height:30px" in card_text
+    assert ".member-balance-row{display:grid" in card_text
+    assert "min-height:58px" in card_text
+    assert ".member-trim{height:52px}" in card_text
+    assert "width:34px;height:34px" in card_text
+    assert "touch-action:pan-y" in card_text
+
+
+def test_same_balance_model_is_used_for_every_group_size():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "this._groupMembers.map((member) =>" in card_text
+    assert "this._groupMembers.length" in card_text
+    assert "Speaker Balance" in card_text
+    assert "groupMembers.length === 2" not in card_text
+    assert "groupMembers.length >= 4" not in card_text
+
+
+
+def test_open_balance_panel_is_not_rebuilt_on_every_state_update():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    update_block = card_text.split("  _updateNowPlaying() {", 1)[1].split(
+        "  _styles() {", 1
+    )[0]
+    assert 'if (this._moreOpen) this._renderNowOverlays();' not in update_block
+    assert ".member-volume" not in update_block
+    assert (
+        'this._selectedPlayer === player && this._moreOpen'
+        in card_text
+    )

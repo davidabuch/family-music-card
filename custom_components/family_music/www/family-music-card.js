@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.10";
+const CARD_VERSION = "0.3.11";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -27,6 +27,8 @@ class FamilyMusicCard extends HTMLElement {
     this._groupMembersFor = null;
     this._groupMembersLoading = false;
     this._membersExpanded = false;
+    this._mixBaselinePercent = null;
+    this._memberTrimValues = new Map();
     this._optimisticPlayback = null;
     this._optimisticPlaybackUntil = 0;
     this._optimisticVolumes = new Map();
@@ -224,34 +226,31 @@ class FamilyMusicCard extends HTMLElement {
     if (!this._moreOpen) return "";
     const groupSection = this._isSelectedGroup()
       ? `
-        <div class="popover-section-title">Speaker volumes</div>
-        <div class="member-volume-list">
+        <div class="popover-title">Speaker Balance</div>
+        <div class="balance-help">Shape where the sound comes from. No percentages to manage.</div>
+        <div class="member-balance-list">
           ${this._groupMembersLoading
             ? '<div class="menu-status">Loading speakers…</div>'
             : this._groupMembers.length
               ? this._groupMembers.map((member) => {
-                  const state = this._hass?.states?.[member.entity_id];
-                  const volume = state?.attributes?.volume_level;
-                  const actualPercent = volume == null ? 0 : Math.round(volume * 100);
-                  const value = this._optimisticVolume(member.entity_id, actualPercent);
+                  const trim = this._memberTrimValues.get(member.entity_id) ?? 0;
                   return `
-                    <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
-                      <div class="member-volume-name">${this._escape(member.name)}</div>
-                      <button class="member-volume-nudge member-volume-down"
-                        data-entity="${this._escape(member.entity_id)}" data-delta="-1"
-                        aria-label="${this._escape(member.name)} volume down 1">−</button>
-                      <input class="member-volume" data-entity="${this._escape(member.entity_id)}"
-                        type="range" min="0" max="100" step="1" value="${value}"
-                        aria-label="${this._escape(member.name)} volume">
-                      <div class="member-volume-value">${value}</div>
-                      <button class="member-volume-nudge member-volume-up"
-                        data-entity="${this._escape(member.entity_id)}" data-delta="1"
-                        aria-label="${this._escape(member.name)} volume up 1">+</button>
+                    <div class="member-balance-row" data-member="${this._escape(member.entity_id)}">
+                      <div class="member-balance-name">${this._escape(member.name)}</div>
+                      <input class="member-trim" data-entity="${this._escape(member.entity_id)}"
+                        type="range" min="-12" max="12" step="1" value="${trim}"
+                        aria-label="${this._escape(member.name)} balance, less to more">
                     </div>
                   `;
                 }).join("")
               : '<div class="menu-status">No group members found.</div>'}
         </div>
+        ${this._groupMembers.length
+          ? '<div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div>'
+          : ""}
+        ${this._groupMembers.length
+          ? '<button id="resetSpeakerBalance" class="balance-reset" type="button">Reset balance</button>'
+          : ""}
       `
       : '<div class="menu-status">This destination is a single speaker.</div>';
 
@@ -293,6 +292,8 @@ class FamilyMusicCard extends HTMLElement {
         this._groupMembers = [];
         this._groupMembersFor = null;
         this._membersExpanded = false;
+        this._mixBaselinePercent = null;
+        this._memberTrimValues.clear();
         this._destinationOpen = false;
         this._moreOpen = false;
         this._optimisticPlayback = null;
@@ -330,6 +331,7 @@ class FamilyMusicCard extends HTMLElement {
       if (this._selectedPlayer === player) {
         this._groupMembers = Array.isArray(members) ? members : [];
         this._groupMembersFor = player;
+        this._initializeSpeakerBalance();
       }
     } catch (_error) {
       if (this._selectedPlayer === player) {
@@ -338,50 +340,57 @@ class FamilyMusicCard extends HTMLElement {
       }
     } finally {
       this._groupMembersLoading = false;
-      if (this._view === "now" && this._selectedPlayer === player) {
-        this._renderMemberVolumePanel();
-    
+      if (this._view === "now" && this._selectedPlayer === player && this._moreOpen) {
+        this._renderNowOverlays();
       }
     }
   }
 
+  _initializeSpeakerBalance() {
+    const samples = this._groupMembers
+      .map((member) => {
+        const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
+        return volume == null ? null : Math.round(volume * 100);
+      })
+      .filter((value) => Number.isFinite(value));
+    if (!samples.length) {
+      this._mixBaselinePercent = 0;
+      this._memberTrimValues.clear();
+      return;
+    }
+    this._mixBaselinePercent = samples.reduce((sum, value) => sum + value, 0) / samples.length;
+    this._memberTrimValues.clear();
+    this._groupMembers.forEach((member) => {
+      const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
+      const percent = volume == null ? this._mixBaselinePercent : Math.round(volume * 100);
+      const trim = Math.max(-12, Math.min(12, Math.round((percent - this._mixBaselinePercent) / 2)));
+      this._memberTrimValues.set(member.entity_id, trim);
+    });
+  }
+
+  _trimTargetPercent(trim) {
+    const baseline = Number.isFinite(this._mixBaselinePercent) ? this._mixBaselinePercent : 0;
+    return Math.max(0, Math.min(100, Math.round(baseline + Number(trim || 0) * 2)));
+  }
+
+  _resetSpeakerBalance() {
+    this._memberTrimValues.clear();
+    this._groupMembers.forEach((member) => this._memberTrimValues.set(member.entity_id, 0));
+    const baseline = Math.max(0, Math.min(100, Math.round(this._mixBaselinePercent || 0)));
+    this._groupMembers.forEach((member) => {
+      this._queueVolumeWrite(
+        member.entity_id,
+        baseline,
+        true,
+        member.native_entity_id || member.entity_id
+      );
+    });
+    this._renderNowOverlays();
+  }
+
   _memberVolumeMarkup() {
     if (!this._isSelectedGroup()) return "";
-    const count = this._groupMembers.length;
-    const label = count ? `Speakers · ${count}` : "Speakers";
-    const chevron = this._membersExpanded ? "mdi:chevron-up" : "mdi:chevron-down";
-    const rows = this._membersExpanded
-      ? this._groupMembers.map((member) => {
-          const state = this._hass?.states?.[member.entity_id];
-          const volume = state?.attributes?.volume_level;
-          const actualPercent = volume == null ? 0 : Math.round(volume * 100);
-          const value = this._optimisticVolume(member.entity_id, actualPercent);
-          const disabled = !member.available || !state ? "disabled" : "";
-          return `
-            <div class="member-volume-row" data-member="${this._escape(member.entity_id)}">
-              <div class="member-volume-name">${this._escape(member.name)}</div>
-              <input class="member-volume" data-entity="${this._escape(member.entity_id)}"
-                type="range" min="0" max="100" step="1" value="${value}" ${disabled}
-                aria-label="${this._escape(member.name)} volume">
-              <div class="member-volume-value">${value}%</div>
-            </div>
-          `;
-        }).join("")
-      : "";
-    const empty = this._membersExpanded && !this._groupMembersLoading && !count
-      ? '<div class="member-volume-empty">No group members found.</div>'
-      : "";
-    const loading = this._membersExpanded && this._groupMembersLoading
-      ? '<div class="member-volume-empty">Loading speakers…</div>'
-      : "";
-    return `
-      <div class="member-volume-panel">
-        <button id="toggleMembers" class="member-volume-toggle" type="button">
-          <span>${label}</span><ha-icon icon="${chevron}"></ha-icon>
-        </button>
-        <div id="memberVolumeRows">${loading}${empty}${rows}</div>
-      </div>
-    `;
+    return "";
   }
 
   _renderMemberVolumePanel() {
@@ -392,45 +401,26 @@ class FamilyMusicCard extends HTMLElement {
   }
 
   _wireMemberVolumePanel() {
-    this.shadowRoot.getElementById("toggleMembers")?.addEventListener("click", async () => {
-      this._membersExpanded = !this._membersExpanded;
-      this._renderMemberVolumePanel();
-      if (this._membersExpanded) await this._loadGroupMembers(true);
-    });
-    this.shadowRoot.querySelectorAll(".member-volume").forEach((slider) => {
-      slider.addEventListener("input", (event) => {
+    this.shadowRoot.querySelectorAll(".member-trim").forEach((slider) => {
+      const apply = (event, flush) => {
         const entityId = event.target.dataset.entity;
         if (!entityId) return;
-        const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
-        const row = event.target.closest(".member-volume-row");
-        const display = row?.querySelector(".member-volume-value");
-        if (display) display.textContent = `${Math.round(value)}%`;
+        const trim = Math.max(-12, Math.min(12, Number(event.target.value || 0)));
+        this._memberTrimValues.set(entityId, trim);
         const member = this._groupMembers.find((item) => item.entity_id === entityId);
-        this._queueVolumeWrite(entityId, value, false, member?.native_entity_id || entityId);
-      });
-      slider.addEventListener("change", (event) => {
-        const entityId = event.target.dataset.entity;
-        if (!entityId) return;
-        const value = Math.max(0, Math.min(100, Number(event.target.value || 0)));
-        const member = this._groupMembers.find((item) => item.entity_id === entityId);
-        this._queueVolumeWrite(entityId, value, true, member?.native_entity_id || entityId);
-      });
+        const targetPercent = this._trimTargetPercent(trim);
+        this._queueVolumeWrite(
+          entityId,
+          targetPercent,
+          flush,
+          member?.native_entity_id || entityId
+        );
+      };
+      slider.addEventListener("input", (event) => apply(event, false));
+      slider.addEventListener("change", (event) => apply(event, true));
     });
-    this.shadowRoot.querySelectorAll(".member-volume-nudge").forEach((button) => {
-      button.addEventListener("click", () => {
-        const entityId = button.dataset.entity;
-        const delta = Number(button.dataset.delta || 0);
-        if (!entityId || !delta) return;
-        const row = button.closest(".member-volume-row");
-        const slider = row?.querySelector(".member-volume");
-        const current = Number(slider?.value || 0);
-        const next = Math.max(0, Math.min(100, current + delta));
-        if (slider) slider.value = next;
-        const display = row?.querySelector(".member-volume-value");
-        if (display) display.textContent = String(next);
-        const member = this._groupMembers.find((item) => item.entity_id === entityId);
-        this._queueVolumeWrite(entityId, next, true, member?.native_entity_id || entityId);
-      });
+    this.shadowRoot.getElementById("resetSpeakerBalance")?.addEventListener("click", () => {
+      this._resetSpeakerBalance();
     });
   }
 
@@ -1020,6 +1010,8 @@ class FamilyMusicCard extends HTMLElement {
       this._groupMembers = [];
       this._groupMembersFor = null;
       this._membersExpanded = false;
+      this._mixBaselinePercent = null;
+      this._memberTrimValues.clear();
       this._optimisticPlayback = null;
       this._optimisticPlaybackUntil = 0;
       this._optimisticShuffle = null;
@@ -1051,6 +1043,8 @@ class FamilyMusicCard extends HTMLElement {
       this._destinationOpen = false;
       this._renderNowOverlays();
       if (this._moreOpen) {
+        this._mixBaselinePercent = null;
+        this._memberTrimValues.clear();
         await this._loadGroupMembers(true);
       }
     });
@@ -1474,24 +1468,6 @@ class FamilyMusicCard extends HTMLElement {
       volume.value = displayPercent;
       if (volumeValue) volumeValue.textContent = String(displayPercent);
     }
-    if ((this._membersExpanded || this._moreOpen) && this._groupMembersFor === this._selectedPlayer) {
-      this._groupMembers.forEach((member) => {
-        const memberState = this._hass.states[member.entity_id];
-        const memberVolume = memberState?.attributes?.volume_level;
-        if (memberVolume == null) return;
-        const slider = this.shadowRoot.querySelector(
-          `.member-volume[data-entity="${CSS.escape(member.entity_id)}"]`
-        );
-        if (slider && document.activeElement !== slider) {
-          const actualPercent = Math.round(memberVolume * 100);
-          const displayPercent = this._optimisticVolume(member.entity_id, actualPercent);
-          slider.value = displayPercent;
-          const row = slider.closest(".member-volume-row");
-          const display = row?.querySelector(".member-volume-value");
-          if (display) display.textContent = `${displayPercent}%`;
-        }
-      });
-    }
     if (muteToggle) {
       const actualMuted = Boolean(attrs.is_volume_muted);
       if (this._optimisticMute !== null) {
@@ -1547,7 +1523,6 @@ class FamilyMusicCard extends HTMLElement {
     }
     const destinationName = this.shadowRoot.getElementById("destinationName");
     if (destinationName) destinationName.textContent = this._selectedPlayerName();
-    if (this._moreOpen) this._renderNowOverlays();
   }
 
   _styles() {
@@ -1570,7 +1545,7 @@ class FamilyMusicCard extends HTMLElement {
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden;padding:0;background:transparent}.music-search-icon{width:100%;height:100%;display:block;border-radius:50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.group-speakers-button ha-icon{--mdc-icon-size:31px}.group-speakers-button:disabled,.group-speakers-button.disabled{opacity:.28;cursor:default;filter:grayscale(1)}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 28px;gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}.destination-activity{width:28px;height:22px}.playing-equalizer{width:28px;height:22px;display:flex;align-items:flex-end;justify-content:center;gap:3px}.playing-equalizer i{display:block;width:3px;height:7px;border-radius:999px;background:currentColor;transform-origin:center bottom;animation:familyMusicEq 760ms ease-in-out infinite alternate}.playing-equalizer i:nth-child(2){height:15px;animation-duration:560ms;animation-delay:-210ms}.playing-equalizer i:nth-child(3){height:10px;animation-duration:690ms;animation-delay:-390ms}@keyframes familyMusicEq{0%{transform:scaleY(.35);opacity:.55}100%{transform:scaleY(1);opacity:1}}@media(prefers-reduced-motion:reduce){.playing-equalizer i{animation:none}}
-      .member-volume-list{display:flex;flex-direction:column;gap:8px}.member-volume-row{display:grid;grid-template-columns:minmax(90px,1fr) 28px minmax(110px,2fr) 34px 28px;gap:7px;align-items:center;min-height:36px}.member-volume-name{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-volume{width:100%;height:22px;margin:0}.member-volume-value{font-size:13px;text-align:right;color:rgba(255,255,255,.65);font-variant-numeric:tabular-nums}.member-volume-nudge{width:28px;height:28px;border:0;background:transparent;color:#fff;font-size:24px;font-weight:300;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
+      .balance-help{font-size:14px;line-height:1.35;color:rgba(255,255,255,.62);margin:-4px 0 14px}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr);gap:14px;align-items:center;min-height:58px}.member-balance-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-trim{width:100%;height:46px;margin:0;appearance:none;-webkit-appearance:none;background:transparent;touch-action:pan-y;cursor:pointer}.member-trim::-webkit-slider-runnable-track{height:8px;border-radius:999px;background:linear-gradient(to right,rgba(255,255,255,.28),rgba(255,255,255,.28))}.member-trim::-webkit-slider-thumb{-webkit-appearance:none;width:30px;height:30px;border-radius:50%;background:#fff;margin-top:-11px;box-shadow:0 1px 6px rgba(0,0,0,.35)}.member-trim::-moz-range-track{height:8px;border-radius:999px;background:rgba(255,255,255,.28)}.member-trim::-moz-range-thumb{width:30px;height:30px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.35)}.balance-scale{display:grid;grid-template-columns:1fr 1fr 1fr;margin:1px 0 12px;padding-left:calc(110px + 14px);font-size:11px;color:rgba(255,255,255,.46)}.balance-scale span:nth-child(2){text-align:center}.balance-scale span:last-child{text-align:right}.balance-reset{display:block;width:100%;height:44px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;cursor:pointer}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
       .nav-strip{height:78px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto;padding:4px 8px 6px;gap:4px}
       .nav-button{min-width:0;width:100%;height:64px;border:0;border-radius:14px;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:0}
       .nav-button ha-icon{--mdc-icon-size:26px}.nav-button span{font-size:11px;font-weight:700;white-space:nowrap}.nav-button.active{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}
@@ -1594,7 +1569,7 @@ class FamilyMusicCard extends HTMLElement {
       .album-hero{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;margin:10px 0 20px}
       .album-art{width:150px;height:150px;border-radius:18px;overflow:hidden;background:var(--secondary-background-color);display:flex;align-items:center;justify-content:center}.album-art ha-icon{--mdc-icon-size:56px}
       .album-name{font-size:24px;font-weight:850}.album-artist{margin-top:5px;color:var(--secondary-text-color)}.album-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.album-actions button{height:42px;display:flex;align-items:center;gap:7px}
-      @media(max-width:600px){.search-row{grid-template-columns:minmax(0,1fr) 44px auto;gap:7px}.voice-search{width:44px;height:44px}.search-go{padding:0 13px}.nav-strip{padding-left:5px;padding-right:5px}.nav-button span{font-size:10px}.now-shell,.browser-shell{min-height:560px}.hero,.now-content{min-height:650px}.now-content{padding:18px 18px 16px}.artwork-stage{width:min(84vw,390px);margin-bottom:18px}.track-title{font-size:25px}.track-meta{font-size:15px}.transport{margin-left:16px;margin-right:16px}.bottom-actions{grid-template-columns:54px minmax(0,1fr) 54px}.bottom-circle{width:54px;height:54px}.destination-pill{height:54px;font-size:16px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.nav-button{min-width:0}}
+      @media(max-width:600px){.search-row{grid-template-columns:minmax(0,1fr) 44px auto;gap:7px}.voice-search{width:44px;height:44px}.search-go{padding:0 13px}.nav-strip{padding-left:5px;padding-right:5px}.nav-button span{font-size:10px}.now-shell,.browser-shell{min-height:560px}.hero,.now-content{min-height:650px}.now-content{padding:18px 18px 16px}.artwork-stage{width:min(84vw,390px);margin-bottom:18px}.track-title{font-size:25px}.track-meta{font-size:15px}.transport{margin-left:16px;margin-right:16px}.bottom-actions{grid-template-columns:54px minmax(0,1fr) 54px}.bottom-circle{width:54px;height:54px}.destination-pill{height:54px;font-size:16px}.tile-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.album-hero{grid-template-columns:110px minmax(0,1fr)}.album-art{width:110px;height:110px}.track-source,.recent-type{display:none}.track-row{grid-template-columns:22px 46px minmax(0,1fr)}.recent-row{grid-template-columns:52px minmax(0,1fr)}.recent-thumb{width:52px;height:52px}.member-balance-row{grid-template-columns:96px minmax(0,1fr);gap:10px;min-height:64px}.member-trim{height:52px}.member-trim::-webkit-slider-thumb{width:34px;height:34px;margin-top:-13px}.member-trim::-moz-range-thumb{width:34px;height:34px}.balance-scale{padding-left:106px}.nav-button{min-width:0}}
     `;
   }
 
