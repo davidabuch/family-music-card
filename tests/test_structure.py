@@ -385,7 +385,11 @@ def test_volume_writes_can_target_native_sonos_without_losing_optimistic_key():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
-    assert "_queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId)" in card_text
+    expected_signature = (
+        "_queueVolumeWrite(entityId, percent, flush = false, "
+        "targetEntityId = entityId)"
+    )
+    assert expected_signature in card_text
     assert "entity_id: target" in card_text
     assert "member?.native_entity_id || entityId" in card_text
     assert "this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer" in card_text
