@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.12"
+    assert manifest["version"] == "0.3.13"
     assert card_path.exists()
 
 
@@ -455,3 +455,33 @@ def test_open_balance_panel_is_not_rebuilt_on_every_state_update():
         'this._selectedPlayer === player && this._moreOpen'
         in card_text
     )
+
+
+
+def test_playback_selection_acknowledges_tap_immediately():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "_markPendingSelection(item.uri, this._pendingPlayName)" in card_text
+    assert 'className = "selection-feedback"' in card_text
+    assert "Starting…" in card_text
+    assert 'button.classList.add("starting")' in card_text
+    assert 'button.setAttribute("aria-busy", "true")' in card_text
+    play_block = card_text.split("  async _play(item, enqueue = \"play\") {", 1)[1].split(
+        "  _markPendingSelection", 1
+    )[0]
+    assert play_block.index("_markPendingSelection") < play_block.index(
+        'await this._hass.callService("music_assistant", "play_media"'
+    )
+
+
+def test_physical_sonos_skip_uses_native_peer_with_immediate_feedback():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert "_skipTrack(direction)" in card_text
+    assert "this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer" in card_text
+    assert 'direction === "next" ? "media_next_track" : "media_previous_track"' in card_text
+    assert 'button?.classList.add("accepted")' in card_text
+    assert 'button?.setAttribute("aria-busy", "true")' in card_text
+    assert '.transport-button.accepted' in card_text
