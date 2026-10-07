@@ -39,7 +39,7 @@ Then open `http://<server-ip>:8099`.
 ## Docker
 
 ```sh
-docker build -f standalone/Dockerfile -t family-music .
+docker build -t family-music standalone
 docker run --rm --network host \
   -e MA_URL=http://127.0.0.1:8095 \
   -e MA_TOKEN='replace-me' \
@@ -67,3 +67,12 @@ Speaker Balance and household-friendly access controls will be migrated next fro
 ## Security
 
 This initial build is for a trusted home LAN. Do **not** expose port 8099 directly to the public internet. Remote access should be added later behind TLS and an authentication layer.
+
+
+## Home Assistant OS installation
+
+This repository is also a Home Assistant App repository. In **Settings -> Apps -> App store**, add:
+
+`https://github.com/davidabuch/family-music-card`
+
+Install **Family Music**, paste the Music Assistant long-lived token in the app configuration, and start it. The PWA is then available on port 8099 of the Home Assistant host. Home Assistant Core credentials are not used by the app.
