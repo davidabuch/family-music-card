@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SERVER_PATH = ROOT / "standalone" / "server.py"
+
+spec = importlib.util.spec_from_file_location("family_music_standalone", SERVER_PATH)
+assert spec and spec.loader
+standalone = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(standalone)
+
+
+def test_normalize_item_keeps_core_music_fields():
+    item = {
+        "uri": "apple_music://track/123",
+        "name": "Song",
+        "media_type": "track",
+        "favorite": True,
+        "duration": 212,
+        "artists": [{"name": "Artist", "uri": "apple_music://artist/7"}],
+        "album": {"name": "Album", "uri": "apple_music://album/9"},
+        "metadata": {"images": [{"path": "http://ma/image"}]},
+    }
+
+    result = standalone.normalize_item(item)
+
+    assert result["uri"] == "apple_music://track/123"
+    assert result["name"] == "Song"
+    assert result["media_type"] == "track"
+    assert result["image"] == "http://ma/image"
+    assert result["artists"] == [{"name": "Artist", "uri": "apple_music://artist/7"}]
+    assert result["album"] == {"name": "Album", "uri": "apple_music://album/9"}
+
+
+def test_players_respect_optional_allowlist(monkeypatch):
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: [
+            {"player_id": "p2", "name": "Backyard"},
+            {"player_id": "p1", "name": "Kitchen"},
+        ],
+    )
+    monkeypatch.setattr(standalone, "PLAYER_ALLOWLIST", {"p1"})
+
+    assert standalone.get_players() == [{"player_id": "p1", "name": "Kitchen"}]
+
+
+def test_favorites_call_music_assistant_library_commands(monkeypatch):
+    calls = []
+
+    def fake_command(command, **kwargs):
+        calls.append((command, kwargs))
+        return [{"uri": f"library://{command}", "name": "Favorite"}]
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+
+    result = standalone.favorites(limit=12)
+
+    assert set(result) == {"artists", "albums", "tracks", "playlists", "radio"}
+    assert len(calls) == 5
+    assert all(call[1]["favorite"] is True for call in calls)
+    assert all(call[1]["limit"] == 12 for call in calls)
+
+
+def test_search_scopes_provider_domains(monkeypatch):
+    captured = {}
+
+    def fake_command(command, **kwargs):
+        captured["command"] = command
+        captured["args"] = kwargs
+        return {"tracks": [{"uri": "spotify://track/1", "name": "Track"}]}
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+
+    result = standalone.search("test", provider="spotify", limit=7)
+
+    assert captured["command"] == "music/search"
+    assert captured["args"]["providers"] == ["spotify"]
+    assert captured["args"]["limit"] == 7
+    assert result["tracks"][0]["uri"] == "spotify://track/1"
+
+
+def test_pwa_keeps_token_out_of_browser_assets():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+
+    assert "MA_TOKEN" not in app_js
+    assert "Authorization" not in app_js
+    assert "MA_TOKEN" not in index
+    assert "/api/play" in app_js
+    assert "/api/transport" in app_js
+    assert "/api/volume" in app_js
+
+
+def test_pwa_is_installable_and_has_immediate_feedback():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    manifest = (ROOT / "standalone" / "web" / "manifest.webmanifest").read_text()
+
+    assert 'rel="manifest"' in index
+    assert '"display": "standalone"' in manifest
+    assert 'className = "feedback"' in app_js
+    assert "Starting…" in app_js
+    assert 'classList.add("accepted")' in app_js
