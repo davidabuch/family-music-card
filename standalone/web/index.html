@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#171513">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Family Music">
+  <title>Family Music</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main id="app" class="app-shell">
+    <section class="topbar">
+      <div>
+        <div class="eyebrow">FAMILY MUSIC</div>
+        <h1>Now Playing</h1>
+      </div>
+      <select id="playerSelect" aria-label="Playback destination"></select>
+    </section>
+
+    <section id="nowView" class="view active">
+      <div class="hero">
+        <div id="artwork" class="artwork"><span>♪</span></div>
+        <div class="track-copy">
+          <h2 id="trackTitle">Nothing playing</h2>
+          <p id="trackMeta">Choose a favorite, recent item, or search result.</p>
+        </div>
+        <div class="transport">
+          <button id="previous" aria-label="Previous">⏮</button>
+          <button id="playPause" class="primary" aria-label="Play or pause">▶</button>
+          <button id="next" aria-label="Next">⏭</button>
+        </div>
+        <div class="volume-row">
+          <span>🔈</span>
+          <input id="volume" type="range" min="0" max="100" step="1" value="20" aria-label="Volume">
+          <span id="volumeValue">20</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="favoritesView" class="view"><div id="favoritesBody" class="content"></div></section>
+    <section id="recentsView" class="view"><div id="recentsBody" class="content"></div></section>
+    <section id="searchView" class="view">
+      <div class="searchbar">
+        <input id="searchInput" type="search" placeholder="Artist, album, song, playlist or station…">
+        <button id="searchButton">Search</button>
+      </div>
+      <div class="provider-row">
+        <button class="provider active" data-provider="all">All</button>
+        <button class="provider" data-provider="apple">Apple Music</button>
+        <button class="provider" data-provider="spotify">Spotify</button>
+      </div>
+      <div id="searchBody" class="content"></div>
+    </section>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <nav class="tabbar">
+      <button data-view="now" class="active"><span>⌂</span><small>Now</small></button>
+      <button data-view="recents"><span>↺</span><small>Recents</small></button>
+      <button data-view="favorites"><span>♥</span><small>Favorites</small></button>
+      <button data-view="search"><span>⌕</span><small>Search</small></button>
+    </nav>
+  </main>
+  <script src="/app.js" defer></script>
+</body>
+</html>
