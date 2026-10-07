@@ -116,7 +116,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.1.2"' in app_config
+    assert 'version: "0.2.0"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -152,3 +152,19 @@ def test_standalone_mute_is_interactive_and_optimistic():
     assert 'addEventListener("click", toggleMute)' in app_js
     assert 'path == "/api/mute"' in server
     assert '"players/cmd/volume_mute"' in server
+
+
+def test_standalone_card_parity_controls():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    server = (ROOT / "standalone" / "server.py").read_text()
+
+    for element_id in ("progress", "shuffle", "repeat", "volumeDown", "volumeUp", "destination", "more", "openSearch"):
+        assert f'id="{element_id}"' in index
+    assert 'player?.type === "group" ? player?.group_volume : player?.volume_level' in app_js
+    assert 'renderDestinationOverlay' in app_js
+    assert 'renderBalanceOverlay' in app_js
+    assert 'path == "/api/queue-control"' in server
+    assert '"player_queues/seek"' in server
+    assert '"player_queues/shuffle"' in server
+    assert '"player_queues/repeat"' in server
