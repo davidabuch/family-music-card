@@ -142,7 +142,7 @@ def test_group_member_volume_controls_live_in_more_menu():
     assert "Speaker volumes" in card_text
     assert 'class="member-volume"' in card_text
     assert 'player_entity_id: player' in card_text
-    assert 'entity_id: entityId' in card_text
+    assert 'entity_id: target' in card_text
     assert '"volume_set"' in card_text
 
 
@@ -155,7 +155,7 @@ def test_optimistic_responsive_media_controls():
     assert "this._optimisticPlaybackUntil" in card_text
     assert "this._optimisticVolumes = new Map()" in card_text
     assert "this._volumeWrites = new Map()" in card_text
-    assert "_queueVolumeWrite(entityId, percent, flush = false)" in card_text
+    assert "_queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId)" in card_text
     assert "elapsed >= 35" in card_text
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
@@ -200,14 +200,15 @@ def test_group_member_volume_rows_have_one_point_nudges():
     assert 'data-delta="-1"' in card_text
     assert 'data-delta="1"' in card_text
     assert "current + delta" in card_text
-    assert "_queueVolumeWrite(entityId, next, true)" in card_text
+    assert "member?.native_entity_id || entityId" in card_text
+    assert "_queueVolumeWrite(entityId, next, true," in card_text
 
 
 def test_volume_drag_coalescing_is_faster():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
-    assert "elapsed >= 60" in card_text
+    assert "elapsed >= 35" in card_text
     assert "Math.max(0, 35 - elapsed)" in card_text
 
 
