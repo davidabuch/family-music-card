@@ -6,6 +6,7 @@ const state = {
   provider: "all",
   pendingUri: null,
   pollTimer: null,
+  pendingMute: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -97,10 +98,14 @@ function renderPlayerSelect() {
     state.selectedPlayerId = state.players[0].player_id;
     localStorage.setItem("family-music-player-id", state.selectedPlayerId);
   }
-  select.innerHTML = state.players
-    .map((player) => `<option value="${escapeHtml(player.player_id)}">${escapeHtml(playerName(player))}</option>`)
-    .join("");
-  select.value = state.selectedPlayerId;
+  const signature = state.players.map((player) => `${player.player_id}\u0000${playerName(player)}`).join("\u0001");
+  if (select.dataset.playerSignature !== signature) {
+    select.innerHTML = state.players
+      .map((player) => `<option value="${escapeHtml(player.player_id)}">${escapeHtml(playerName(player))}</option>`)
+      .join("");
+    select.dataset.playerSignature = signature;
+  }
+  if (document.activeElement !== select) select.value = state.selectedPlayerId;
 }
 
 function renderNow() {
@@ -120,6 +125,13 @@ function renderNow() {
     player?.state === "playing";
   $("#playPause").textContent = playing ? "❚❚" : "▶";
 
+  const pendingMute = state.pendingMute?.playerId === player?.player_id ? state.pendingMute : null;
+  const muted = pendingMute ? pendingMute.muted : Boolean(player?.volume_muted);
+  const muteButton = $("#mute");
+  muteButton.textContent = muted ? "🔇" : "🔈";
+  muteButton.setAttribute("aria-pressed", String(muted));
+  muteButton.setAttribute("aria-label", muted ? "Unmute" : "Mute");
+
   const volume = Number(player?.volume_level);
   if (Number.isFinite(volume)) {
     const bounded = Math.max(0, Math.min(100, Math.round(volume)));
@@ -133,6 +145,15 @@ async function refreshState() {
     const result = await api("/api/state");
     state.players = Array.isArray(result.players) ? result.players.filter((p) => p.available !== false) : [];
     state.queues = Array.isArray(result.queues) ? result.queues : [];
+    if (state.pendingMute) {
+      const acknowledged = state.players.find((p) => p.player_id === state.pendingMute.playerId);
+      if (
+        (acknowledged && Boolean(acknowledged.volume_muted) === state.pendingMute.muted) ||
+        Date.now() >= state.pendingMute.expiresAt
+      ) {
+        state.pendingMute = null;
+      }
+    }
     renderPlayerSelect();
     renderNow();
   } catch (error) {
@@ -330,6 +351,28 @@ function setVolume(level, flush = false) {
   }
 }
 
+async function toggleMute() {
+  const player = selectedPlayer();
+  if (!player) return;
+  const currentMuted =
+    state.pendingMute?.playerId === player.player_id
+      ? state.pendingMute.muted
+      : Boolean(player.volume_muted);
+  const muted = !currentMuted;
+  state.pendingMute = {playerId: player.player_id, muted, expiresAt: Date.now() + 5000};
+  renderNow();
+  try {
+    await api("/api/mute", {
+      method: "POST",
+      body: JSON.stringify({player_id: player.player_id, muted}),
+    });
+  } catch (error) {
+    state.pendingMute = null;
+    renderNow();
+    showToast(error.message, 3000);
+  }
+}
+
 function wire() {
   $("#playerSelect").addEventListener("change", (event) => {
     state.selectedPlayerId = event.target.value;
@@ -357,6 +400,7 @@ function wire() {
     const action = queue?.state === "playing" ? "pause" : "play";
     transport(action, event.currentTarget);
   });
+  $("#mute").addEventListener("click", toggleMute);
   $("#volume").addEventListener("input", (event) => setVolume(event.target.value, false));
   $("#volume").addEventListener("change", (event) => setVolume(event.target.value, true));
 }
