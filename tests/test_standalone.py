@@ -115,7 +115,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.1.0"' in app_config
+    assert 'version: "0.1.1"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -125,3 +125,10 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     assert "BUILD_FROM" not in dockerfile
     assert "MA_URL" in run_script
     assert "MA_TOKEN" in run_script
+
+
+
+def test_haos_app_webui_uses_supervisor_placeholders():
+    app_config = (ROOT / "standalone" / "config.yaml").read_text()
+    assert 'webui: "[PROTO:http]://[HOST]:[PORT:8099]"' in app_config
+    assert "webui: http://[HOST]:8099" not in app_config
