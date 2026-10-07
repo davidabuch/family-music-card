@@ -155,7 +155,10 @@ def test_optimistic_responsive_media_controls():
     assert "this._optimisticPlaybackUntil" in card_text
     assert "this._optimisticVolumes = new Map()" in card_text
     assert "this._volumeWrites = new Map()" in card_text
-    assert "_queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId)" in card_text
+    assert (
+        "_queueVolumeWrite(entityId, percent, flush = false, targetEntityId = entityId)"
+        in card_text
+    )
     assert "elapsed >= 35" in card_text
     assert 'addEventListener("change"' in card_text
     assert 'targetState === "playing" ? "media_play" : "media_pause"' in card_text
