@@ -289,6 +289,7 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     except Exception as err:
         # UPnP 701 means this source cannot perform the requested transition.
         # Music Assistant may still have a navigable album/playlist queue.
+        # Fall back only for unsupported navigation, never for play/pause errors.
         if action in {"next", "previous"} and getattr(err, "error_code", None) == 701:
             NATIVE_SONOS_SESSIONS.discard(queue_id)
             return False
