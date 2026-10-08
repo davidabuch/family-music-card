@@ -151,11 +151,18 @@ def _name_tokens(value: str) -> set[str]:
 
 
 def _matching_item(wanted: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-    exact = [item for item in candidates if str(item.get("name") or "").casefold().strip() == wanted.casefold().strip()]
+    exact = [
+        item for item in candidates
+        if str(item.get("name") or "").casefold().strip() == wanted.casefold().strip()
+    ]
     if exact:
         return exact[0]
     tokens = _name_tokens(wanted)
-    return next((item for item in candidates if tokens and tokens <= _name_tokens(str(item.get("name") or ""))), None)
+    return next(
+        (item for item in candidates
+         if tokens and tokens <= _name_tokens(str(item.get("name") or ""))),
+        None,
+    )
 
 
 def native_sonos_favorites() -> list[dict[str, Any]]:
