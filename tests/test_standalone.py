@@ -56,6 +56,7 @@ def test_favorites_call_music_assistant_library_commands(monkeypatch):
         return [{"uri": f"library://{command}", "name": "Favorite"}]
 
     monkeypatch.setattr(standalone.client, "command", fake_command)
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [])
 
     result = standalone.favorites(limit=12)
 
@@ -116,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.6"' in app_config
+    assert 'version: "0.2.7"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -216,3 +217,25 @@ def test_standalone_destination_playing_equalizer():
     assert ".playing-equalizer{" in styles
     assert "@keyframes familyMusicEq" in styles
     assert 'document.querySelectorAll(".destination-option[data-player]")' in app_js
+
+
+def test_native_sonos_favorites_are_resolved_and_deduplicated(monkeypatch):
+    calls = []
+
+    def command(name, **kwargs):
+        calls.append(name)
+        if name == "music/search":
+            return {"playlists": [{"name": "Family Mix", "uri": "spotify://playlist/1"}]}
+        return [{"name": "Existing", "uri": "spotify://playlist/2"}] if name == "music/playlists/library_items" else []
+
+    monkeypatch.setattr(standalone.client, "command", command)
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [
+        {"name": "Family Mix", "media_type": "playlist"},
+        {"name": "Family Mix", "media_type": "playlist"},
+        {"name": "Existing", "media_type": "playlist"},
+    ])
+    result = standalone.favorites()
+    assert {item["uri"] for item in result["playlists"]} == {
+        "spotify://playlist/1", "spotify://playlist/2"
+    }
+    assert any(item.get("sonos_favorite") for item in result["playlists"])
