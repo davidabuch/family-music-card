@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+- Restore the animated three-bar playing indicator from the HA Family Music card in the standalone destination picker.
+- Derive destination activity directly from Music Assistant player/queue state.
+- Refresh playing indicators in place while the picker is open without rebuilding the menu or disturbing scrolling.
+
 ## 0.2.5
 
 - Hide the persistent bottom navigation while speaker selection or Speaker Balance overlays are open so it can never cover selectable rows or controls.
