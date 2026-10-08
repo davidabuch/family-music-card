@@ -60,7 +60,7 @@ def test_favorites_call_music_assistant_library_commands(monkeypatch):
 
     result = standalone.favorites(limit=12)
 
-    assert set(result) == {"artists", "albums", "tracks", "playlists", "radio"}
+    assert set(result) == {"artists", "albums", "tracks", "playlists", "radio", "sonos_favorites"}
     assert len(calls) == 5
     assert all(call[1]["favorite"] is True for call in calls)
     assert all(call[1]["limit"] == 12 for call in calls)
@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.7"' in app_config
+    assert 'version: "0.2.8"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -237,7 +237,31 @@ def test_native_sonos_favorites_are_resolved_and_deduplicated(monkeypatch):
         {"name": "Existing", "media_type": "playlist"},
     ])
     result = standalone.favorites()
-    assert {item["uri"] for item in result["playlists"]} == {
-        "spotify://playlist/1", "spotify://playlist/2"
-    }
-    assert any(item.get("sonos_favorite") for item in result["playlists"])
+    assert {item["uri"] for item in result["playlists"]} == {"spotify://playlist/2"}
+    assert len(result["sonos_favorites"]) == 3
+
+
+def test_sonos_favorites_are_visible_even_without_ma_match(monkeypatch):
+    monkeypatch.setattr(standalone.client, "command", lambda *args, **kwargs: [])
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [
+        {"name": "Sonos-only Station", "uri": "sonos-favorite://0"}
+    ])
+    result = standalone.favorites()
+    assert result["sonos_favorites"][0]["name"] == "Sonos-only Station"
+
+
+def test_sonos_favorite_index_preserved(monkeypatch):
+    from types import SimpleNamespace
+
+    entries = [
+        SimpleNamespace(title="First", item_class="", album_art_uri=None),
+        SimpleNamespace(title="", item_class="", album_art_uri=None),
+        SimpleNamespace(title="Third", item_class="", album_art_uri=None),
+    ]
+    speaker = SimpleNamespace(
+        music_library=SimpleNamespace(get_sonos_favorites=lambda: entries))
+    monkeypatch.setattr(standalone, "_sonos_household", lambda: speaker)
+    result = standalone.native_sonos_favorites()
+    assert [item["uri"] for item in result] == [
+        "sonos-favorite://0", "sonos-favorite://2"
+    ]
