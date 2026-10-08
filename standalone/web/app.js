@@ -298,6 +298,7 @@ async function playItem(item, button) {
 
 function renderSections(target, data) {
   const sections = [
+    ["Sonos Favorites", data.sonos_favorites],
     ["Artists", data.artists],
     ["Albums", data.albums],
     ["Tracks", data.tracks],
