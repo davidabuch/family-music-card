@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.15"' in app_config
+    assert 'version: "0.2.16"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -356,3 +356,27 @@ def test_transport_uses_physical_player_and_native_progress():
     assert 'currentMediaPosition(item, player)' in js
     assert 'item?.elapsed_time_last_updated' in js
     assert 'action == "play" and player and player.get("state") == "idle"' in server
+
+
+def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
+    from types import SimpleNamespace
+    import sys
+
+    class UnsupportedTransition(Exception):
+        error_code = 701
+
+    class Speaker:
+        uid = "RINCON_TEST"
+
+        def previous(self):
+            raise UnsupportedTransition("Transition not available")
+
+    monkeypatch.setattr(standalone, "get_queues", lambda: [{"queue_id": "RINCON_TEST", "state": "idle"}])
+    monkeypatch.setattr(standalone, "get_players", lambda: [{"player_id": "RINCON_TEST", "state": "playing"}])
+    monkeypatch.setitem(sys.modules, "soco.discovery", SimpleNamespace(discover=lambda timeout: {Speaker()}))
+    standalone.NATIVE_SONOS_SESSIONS.add("RINCON_TEST")
+    try:
+        assert standalone._native_sonos_transport("RINCON_TEST", "previous") is False
+        assert "RINCON_TEST" not in standalone.NATIVE_SONOS_SESSIONS
+    finally:
+        standalone.NATIVE_SONOS_SESSIONS.discard("RINCON_TEST")
