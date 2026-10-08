@@ -240,7 +240,9 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     resource_uri = getattr(resources[0], "uri", None) if resources else None
     if not resource_uri:
         raise ValueError("This Sonos Favorite has no playable URI")
-    speaker.play_uri(resource_uri, meta=entry.didl_metadata)
+    from soco.data_structures import to_didl_string
+
+    speaker.play_uri(resource_uri, meta=to_didl_string(entry))
 
 
 def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
