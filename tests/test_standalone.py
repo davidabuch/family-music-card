@@ -226,7 +226,9 @@ def test_native_sonos_favorites_are_resolved_and_deduplicated(monkeypatch):
         calls.append(name)
         if name == "music/search":
             return {"playlists": [{"name": "Family Mix", "uri": "spotify://playlist/1"}]}
-        return [{"name": "Existing", "uri": "spotify://playlist/2"}] if name == "music/playlists/library_items" else []
+        if name == "music/playlists/library_items":
+            return [{"name": "Existing", "uri": "spotify://playlist/2"}]
+        return []
 
     monkeypatch.setattr(standalone.client, "command", command)
     monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [
