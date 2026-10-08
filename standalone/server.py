@@ -165,20 +165,27 @@ def _matching_item(wanted: str, candidates: list[dict[str, Any]]) -> dict[str, A
     )
 
 
+def _sonos_household():
+    from soco.discovery import discover
+
+    speakers = discover(timeout=3) or set()
+    if not speakers:
+        return None
+    return sorted(speakers, key=lambda item: item.ip_address)[0]
+
+
 def native_sonos_favorites() -> list[dict[str, Any]]:
-    """Read household Sonos Favorites directly over the LAN, never via HA Core."""
+    """Expose all native Sonos favorites, including items absent from MA."""
     try:
-        from soco.discovery import discover
-        speakers = discover(timeout=3) or set()
-        if not speakers:
+        speaker = _sonos_household()
+        if speaker is None:
             return []
-        speaker = sorted(speakers, key=lambda item: item.ip_address)[0]
         entries = speaker.music_library.get_sonos_favorites() or []
     except Exception as err:
-        print(f"[family-music] Sonos favorites unavailable: {err}", flush=True)
+        print("[family-music] Sonos favorites unavailable: " + str(err), flush=True)
         return []
     result = []
-    for entry in entries:
+    for index, entry in enumerate(entries):
         title = getattr(entry, "title", None)
         if not title:
             continue
@@ -189,9 +196,52 @@ def native_sonos_favorites() -> list[dict[str, Any]]:
             "radio" if "broadcast" in item_class or "radio" in item_class else
             "track"
         )
-        result.append({"name": str(title), "media_type": kind,
-                       "image": getattr(entry, "album_art_uri", None)})
+        result.append({
+            "name": str(title),
+            "media_type": kind,
+            "image": getattr(entry, "album_art_uri", None),
+            "uri": "sonos-favorite://" + str(index),
+            "sonos_favorite": True,
+        })
     return result
+
+
+def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
+    """Play a Sonos favorite on its matching physical Sonos speaker."""
+    from soco.discovery import discover
+
+    try:
+        index = int(uri.removeprefix("sonos-favorite://"))
+    except ValueError as err:
+        raise ValueError("Invalid Sonos Favorite") from err
+    if index < 0:
+        raise ValueError("Invalid Sonos Favorite")
+    queues = get_queues()
+    queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
+    if queue is None:
+        raise ValueError("Selected player queue not found")
+    player_id = str(queue.get("active") or queue.get("queue_id") or "")
+    players = get_players()
+    player = next((p for p in players if p.get("player_id") == player_id), None)
+    if player is None:
+        raise ValueError("Selected player not found")
+    target_name = str(player.get("name") or player.get("display_name") or "").casefold()
+    speakers = discover(timeout=3) or set()
+    speaker = next(
+        (sp for sp in speakers if sp.player_name.casefold() == target_name),
+        None,
+    )
+    if speaker is None:
+        raise ValueError("Selected destination is not a directly reachable Sonos speaker")
+    entries = speaker.music_library.get_sonos_favorites() or []
+    if index >= len(entries):
+        raise ValueError("Sonos Favorite is no longer available; refresh Favorites")
+    entry = entries[index]
+    resources = getattr(entry, "resources", None) or []
+    resource_uri = getattr(resources[0], "uri", None) if resources else None
+    if not resource_uri:
+        raise ValueError("This Sonos Favorite has no playable URI")
+    speaker.play_uri(resource_uri, meta=entry.didl_metadata)
 
 
 def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
@@ -245,7 +295,8 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
             summary=False,
         )
         result[key] = [normalize_item(item) for item in raw if isinstance(item, dict)]
-    return merge_sonos_favorites(result, native_sonos_favorites())
+    result["sonos_favorites"] = native_sonos_favorites()
+    return result
 
 
 def recents(queue_id: str, limit: int = 40) -> list[dict[str, Any]]:
@@ -359,11 +410,15 @@ class Handler(BaseHTTPRequestHandler):
                         HTTPStatus.BAD_REQUEST,
                     )
                     return
-                result = client.command(
-                    "player_queues/play_media",
-                    queue_id=queue_id,
-                    media=media,
-                )
+                if isinstance(media, str) and media.startswith("sonos-favorite://"):
+                    play_native_sonos_favorite(queue_id, media)
+                    result = {"sonos_direct": True}
+                else:
+                    result = client.command(
+                        "player_queues/play_media",
+                        queue_id=queue_id,
+                        media=media,
+                    )
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/transport":
