@@ -509,11 +509,67 @@ function renderBalanceOverlay() {
   $("#resetBalance")?.addEventListener("click",()=>document.querySelectorAll(".member-trim").forEach((slider)=>{slider.value=0;slider.dispatchEvent(new Event("change"));}));
 }
 
+let voiceRecognition = null;
+
+function startVoiceSearch() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const input = $("#searchInput");
+  const button = $("#voiceSearch");
+  const status = $("#voiceStatus");
+  if (!SpeechRecognition || !window.isSecureContext) {
+    // iOS home-screen apps served over plain HTTP cannot request microphone
+    // permission for Web Speech. Keep keyboard dictation accessible instead.
+    input.focus();
+    status.textContent = "Use the microphone on your iPhone keyboard to dictate a search.";
+    showToast("Use the microphone on your iPhone keyboard to dictate", 4000);
+    return;
+  }
+  if (voiceRecognition) {
+    voiceRecognition.stop();
+    return;
+  }
+  const recognition = new SpeechRecognition();
+  voiceRecognition = recognition;
+  recognition.lang = navigator.language || "en-US";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+  button.setAttribute("aria-pressed", "true");
+  button.setAttribute("aria-label", "Stop voice search");
+  button.classList.add("listening");
+  status.textContent = "Listening for your search";
+  recognition.onresult = (event) => {
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+    if (transcript) {
+      input.value = transcript;
+      status.textContent = "Recognized " + transcript + ". Searching.";
+      runSearch();
+    }
+  };
+  recognition.onerror = (event) => {
+    status.textContent = "Voice search unavailable: " + (event.error || "unknown error");
+    showToast("Voice search unavailable. Use keyboard dictation.", 4000);
+  };
+  recognition.onend = () => {
+    voiceRecognition = null;
+    button.classList.remove("listening");
+    button.setAttribute("aria-pressed", "false");
+    button.setAttribute("aria-label", "Search by voice");
+  };
+  try {
+    recognition.start();
+  } catch (error) {
+    recognition.onend();
+    input.focus();
+    showToast("Use keyboard dictation for voice search", 3500);
+  }
+}
+
 function wire() {
   document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
-  document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>n.classList.toggle("active",n===button));}));
+  document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});}));
   $("#searchButton").addEventListener("click", runSearch);
+  $("#voiceSearch").addEventListener("click", startVoiceSearch);
   $("#searchInput").addEventListener("keydown",(event)=>{if(event.key==="Enter")runSearch();});
   $("#openSearch").addEventListener("click",()=>setView("search"));
   $("#destination").addEventListener("click",renderDestinationOverlay);
