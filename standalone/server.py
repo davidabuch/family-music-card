@@ -225,7 +225,6 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     player = next((p for p in players if p.get("player_id") == player_id), None)
     if player is None:
         raise ValueError("Selected player not found")
-    target_name = str(player.get("name") or player.get("display_name") or "").casefold()
     speakers = discover(timeout=3) or set()
     speaker = next(
         (sp for sp in speakers if sp.uid == player_id),
