@@ -116,7 +116,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.5"' in app_config
+    assert 'version: "0.2.6"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -205,3 +205,14 @@ def test_standalone_tabbar_hides_while_modal_overlays_are_open():
     assert 'classList.remove("overlay-hidden")' in app_js
     assert ".tabbar.overlay-hidden{" in styles
     assert "pointer-events:none" in styles
+
+
+def test_standalone_destination_playing_equalizer():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    styles = (ROOT / "standalone" / "web" / "styles.css").read_text()
+    assert "function destinationIsPlaying(player)" in app_js
+    assert "function updateDestinationActivity()" in app_js
+    assert 'class="playing-equalizer"' in app_js
+    assert ".playing-equalizer{" in styles
+    assert "@keyframes familyMusicEq" in styles
+    assert 'document.querySelectorAll(".destination-option[data-player]")' in app_js
