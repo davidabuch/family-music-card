@@ -142,6 +142,15 @@ function currentPosition(queue) {
   return position;
 }
 
+function currentMediaPosition(item, player) {
+  let position = Number(item?.elapsed_time) || 0;
+  const updated = Number(item?.elapsed_time_last_updated);
+  if (player?.state === "playing" && Number.isFinite(updated) && updated > 0) {
+    position += Math.max(0, Date.now() / 1000 - updated);
+  }
+  return position;
+}
+
 function effectiveVolume(player) {
   const pending = state.pendingVolume?.playerId === player?.player_id ? state.pendingVolume : null;
   if (pending && Date.now() < pending.expiresAt) return pending.level;
@@ -179,7 +188,9 @@ function renderNow() {
   $("#volumeValue").textContent = volume;
 
   const duration = Number(item?.duration || item?.media_item?.duration || 0);
-  const position = Math.min(duration || Infinity, queueActive ? currentPosition(queue) : Number(item?.elapsed_time || 0));
+  const position = Math.min(duration || Infinity, queueActive
+    ? currentPosition(queue)
+    : currentMediaPosition(item, player));
   if (!state.seeking && document.activeElement !== $("#progress")) $("#progress").value = duration > 0 ? position / duration * 100 : 0;
   $("#elapsed").textContent = formatTime(position);
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
@@ -576,7 +587,7 @@ function wire() {
   $("#more").addEventListener("click",renderBalanceOverlay);
   $("#previous").addEventListener("click",(event)=>transport("previous",event.currentTarget));
   $("#next").addEventListener("click",(event)=>transport("next",event.currentTarget));
-  $("#playPause").addEventListener("click",(event)=>transport(selectedQueue()?.state==="playing"?"pause":"play",event.currentTarget));
+  $("#playPause").addEventListener("click",(event)=>transport(selectedPlayer()?.state==="playing"?"pause":"play",event.currentTarget));
   $("#shuffle").addEventListener("click",toggleShuffle);
   $("#repeat").addEventListener("click",toggleRepeat);
   $("#mute").addEventListener("click",toggleMute);
