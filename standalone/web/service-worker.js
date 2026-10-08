@@ -1,4 +1,4 @@
-const CACHE="family-music-v3";
+const CACHE="family-music-v4";
 const ASSETS=["/","/styles.css","/app.js","/manifest.webmanifest","/icon.svg"];
 self.addEventListener("install",(event)=>event.waitUntil(caches.open(CACHE).then((cache)=>cache.addAll(ASSETS))));
 self.addEventListener("activate",(event)=>event.waitUntil(caches.keys().then((keys)=>Promise.all(keys.filter((key)=>key!==CACHE).map((key)=>caches.delete(key))))));
