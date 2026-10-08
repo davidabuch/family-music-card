@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.14"' in app_config
+    assert 'version: "0.2.15"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -344,3 +344,15 @@ def test_search_voice_control_accessibility():
     assert '!window.isSecureContext' in js
     assert 'input.focus()' in js
     assert 'recognition.onend' in js
+
+
+def test_transport_uses_physical_player_and_native_progress():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "standalone/web/app.js").read_text()
+    server = (root / "standalone/server.py").read_text()
+    assert 'transport(selectedPlayer()?.state==="playing"?"pause":"play"' in js
+    assert 'currentMediaPosition(item, player)' in js
+    assert 'item?.elapsed_time_last_updated' in js
+    assert 'action == "play" and player and player.get("state") == "idle"' in server
