@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.13"' in app_config
+    assert 'version: "0.2.14"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -328,3 +328,19 @@ def test_native_sonos_playlist_queues_reference():
     favorite = SimpleNamespace(reference=reference)
     standalone.play_sonos_favorite(Speaker(), favorite)
     assert calls == ["clear", ("add", reference), ("play", 0)]
+
+
+def test_search_voice_control_accessibility():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "standalone/web"
+    html = (root / "index.html").read_text()
+    js = (root / "app.js").read_text()
+    assert 'id="voiceSearch"' in html
+    assert 'aria-label="Search by voice"' in html
+    assert 'for="searchInput"' in html
+    assert 'id="voiceStatus"' in html
+    assert 'window.webkitSpeechRecognition' in js
+    assert '!window.isSecureContext' in js
+    assert 'input.focus()' in js
+    assert 'recognition.onend' in js
