@@ -359,8 +359,8 @@ def test_transport_uses_physical_player_and_native_progress():
 
 
 def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
-    from types import SimpleNamespace
     import sys
+    from types import SimpleNamespace
 
     class UnsupportedTransition(Exception):
         error_code = 701
@@ -371,9 +371,18 @@ def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
         def previous(self):
             raise UnsupportedTransition("Transition not available")
 
-    monkeypatch.setattr(standalone, "get_queues", lambda: [{"queue_id": "RINCON_TEST", "state": "idle"}])
-    monkeypatch.setattr(standalone, "get_players", lambda: [{"player_id": "RINCON_TEST", "state": "playing"}])
-    monkeypatch.setitem(sys.modules, "soco.discovery", SimpleNamespace(discover=lambda timeout: {Speaker()}))
+    monkeypatch.setattr(
+        standalone, "get_queues",
+        lambda: [{"queue_id": "RINCON_TEST", "state": "idle"}],
+    )
+    monkeypatch.setattr(
+        standalone, "get_players",
+        lambda: [{"player_id": "RINCON_TEST", "state": "playing"}],
+    )
+    monkeypatch.setitem(
+        sys.modules, "soco.discovery",
+        SimpleNamespace(discover=lambda timeout: {Speaker()}),
+    )
     standalone.NATIVE_SONOS_SESSIONS.add("RINCON_TEST")
     try:
         assert standalone._native_sonos_transport("RINCON_TEST", "previous") is False
