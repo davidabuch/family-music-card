@@ -67,6 +67,7 @@ function mediaArtist(item) {
 function mediaImage(item) {
   const media = item?.media_item || item || {};
   if (typeof media.image === "string") return media.image;
+  if (typeof media.image_url === "string") return media.image_url;
   const images = media.metadata?.images;
   if (Array.isArray(images)) {
     const match = images.find((image) => typeof image?.path === "string");
@@ -151,7 +152,7 @@ function effectiveVolume(player) {
 function renderNow() {
   const player = selectedPlayer();
   const queue = selectedQueue();
-  const item = queue?.current_item || player?.current_media || null;
+  // Music Assistant may retain the last queue item after a Sonos-native\n  // station/source change. In that case the player media is authoritative.\n  const queueActive = queue?.state === "playing" || queue?.state === "paused";\n  const item = queueActive\n    ? (queue?.current_item || player?.current_media || null)\n    : (player?.current_media || queue?.current_item || null);
   $("#trackTitle").textContent = mediaName(item);
   $("#trackMeta").textContent = mediaArtist(item) || "—";
   $("#destinationName").textContent = playerName(player);
@@ -160,7 +161,7 @@ function renderNow() {
   const image = mediaImage(item);
   artwork.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="">` : "<span>♪</span>";
 
-  const playing = queue?.state === "playing" || player?.state === "playing";
+  const playing = player?.state === "playing" || (queueActive && queue?.state === "playing");
   $("#playPause").textContent = playing ? "❚❚" : "▶";
 
   const pendingMute = state.pendingMute?.playerId === player?.player_id ? state.pendingMute : null;
@@ -173,7 +174,7 @@ function renderNow() {
   $("#volumeValue").textContent = volume;
 
   const duration = Number(item?.duration || item?.media_item?.duration || 0);
-  const position = Math.min(duration || Infinity, currentPosition(queue));
+  const position = Math.min(duration || Infinity, queueActive ? currentPosition(queue) : Number(item?.elapsed_time || 0));
   if (!state.seeking && document.activeElement !== $("#progress")) $("#progress").value = duration > 0 ? position / duration * 100 : 0;
   $("#elapsed").textContent = formatTime(position);
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
