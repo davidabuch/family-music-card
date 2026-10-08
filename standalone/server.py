@@ -285,8 +285,7 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     if speaker is None:
         return False
     try:
-        {"play": speaker.play, "pause": speaker.pause,
-         "next": speaker.next, "previous": speaker.previous}[action]()
+        getattr(speaker, action)()
     except Exception as err:
         # UPnP 701 means this source cannot perform the requested transition.
         # Music Assistant may still have a navigable album/playlist queue.
