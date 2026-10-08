@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Discover native Sonos Favorites directly over the LAN using SoCo, without HA Core authentication.
+- Resolve Sonos favorites to playable Music Assistant URIs and deduplicate them against MA favorites.
+- Degrade gracefully when Sonos discovery is unavailable.
+
 ## 0.2.6
 
 - Restore the animated three-bar playing indicator from the HA Family Music card in the standalone destination picker.

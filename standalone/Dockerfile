@@ -6,7 +6,7 @@ LABEL io.hass.version="${BUILD_VERSION}" \
       io.hass.arch="${BUILD_ARCH}"
 WORKDIR /app
 COPY . /app
-RUN chmod +x /app/run.sh
+RUN pip install --no-cache-dir 'soco>=0.30,<1' && chmod +x /app/run.sh
 ENV PORT=8099
 EXPOSE 8099
 CMD ["/app/run.sh"]
