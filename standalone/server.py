@@ -143,6 +143,82 @@ def get_queues() -> list[dict[str, Any]]:
     return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
+
+def _name_tokens(value: str) -> set[str]:
+    import re
+
+    return set(re.findall(r"[a-z0-9]+", value.casefold()))
+
+
+def _matching_item(wanted: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    exact = [item for item in candidates if str(item.get("name") or "").casefold().strip() == wanted.casefold().strip()]
+    if exact:
+        return exact[0]
+    tokens = _name_tokens(wanted)
+    return next((item for item in candidates if tokens and tokens <= _name_tokens(str(item.get("name") or ""))), None)
+
+
+def native_sonos_favorites() -> list[dict[str, Any]]:
+    """Read household Sonos Favorites directly over the LAN, never via HA Core."""
+    try:
+        from soco.discovery import discover
+        speakers = discover(timeout=3) or set()
+        if not speakers:
+            return []
+        speaker = sorted(speakers, key=lambda item: item.ip_address)[0]
+        entries = speaker.music_library.get_sonos_favorites() or []
+    except Exception as err:
+        print(f"[family-music] Sonos favorites unavailable: {err}", flush=True)
+        return []
+    result = []
+    for entry in entries:
+        title = getattr(entry, "title", None)
+        if not title:
+            continue
+        item_class = str(getattr(entry, "item_class", "") or "").lower()
+        kind = (
+            "playlist" if "playlist" in item_class else
+            "album" if "album" in item_class else
+            "radio" if "broadcast" in item_class or "radio" in item_class else
+            "track"
+        )
+        result.append({"name": str(title), "media_type": kind,
+                       "image": getattr(entry, "album_art_uri", None)})
+    return result
+
+
+def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
+                          sonos_items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Resolve Sonos titles to MA playable URIs; never expose unplayable entries."""
+    for sonos_item in sonos_items:
+        kind = sonos_item["media_type"]
+        key = "radio" if kind == "radio" else f"{kind}s"
+        existing = result.setdefault(key, [])
+        match = _matching_item(sonos_item["name"], existing)
+        if match is None:
+            try:
+                found = client.command(
+                    "music/search", search_query=sonos_item["name"],
+                    media_types=[kind], limit=25,
+                )
+                candidates = found.get(key, []) if isinstance(found, dict) else []
+                match = _matching_item(sonos_item["name"], candidates)
+            except MAError:
+                continue
+        if not match:
+            continue
+        resolved = normalize_item(match)
+        if not resolved.get("uri"):
+            continue
+        if any(item.get("uri") == resolved["uri"] for item in existing):
+            continue
+        resolved["sonos_favorite"] = True
+        if not resolved.get("image") and sonos_item.get("image"):
+            resolved["image"] = sonos_item["image"]
+        existing.append(resolved)
+    return result
+
+
 def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     commands = {
         "artists": "music/artists/library_items",
@@ -162,7 +238,7 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
             summary=False,
         )
         result[key] = [normalize_item(item) for item in raw if isinstance(item, dict)]
-    return result
+    return merge_sonos_favorites(result, native_sonos_favorites())
 
 
 def recents(queue_id: str, limit: int = 40) -> list[dict[str, Any]]:
