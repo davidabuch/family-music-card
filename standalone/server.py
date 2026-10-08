@@ -220,7 +220,7 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
     if queue is None:
         raise ValueError("Selected player queue not found")
-    player_id = str(queue.get("active") or queue.get("queue_id") or "")
+    player_id = str(queue.get("queue_id") or "")
     players = get_players()
     player = next((p for p in players if p.get("player_id") == player_id), None)
     if player is None:
@@ -228,7 +228,7 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     target_name = str(player.get("name") or player.get("display_name") or "").casefold()
     speakers = discover(timeout=3) or set()
     speaker = next(
-        (sp for sp in speakers if sp.player_name.casefold() == target_name),
+        (sp for sp in speakers if sp.uid == player_id),
         None,
     )
     if speaker is None:
