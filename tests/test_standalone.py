@@ -240,4 +240,4 @@ def test_native_sonos_favorites_are_resolved_and_deduplicated(monkeypatch):
     assert {item["uri"] for item in result["playlists"]} == {
         "spotify://playlist/1", "spotify://playlist/2"
     }
-    assert any(item.get("sonos_favorite") for item in result["playlists"])
+    assert len(result["sonos_favorites"]) == 3
