@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.11"' in app_config
+    assert 'version: "0.2.12"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -265,3 +265,14 @@ def test_sonos_favorite_index_preserved(monkeypatch):
     assert [item["uri"] for item in result] == [
         "sonos-favorite://0", "sonos-favorite://2"
     ]
+
+
+def test_now_playing_declares_item_outside_comment():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "standalone/web/app.js").read_text()
+    start = js.index("function renderNow()")
+    end = js.index('$("#trackTitle")', start)
+    block = js[start:end]
+    assert '\\n' not in block
+    assert '  const item = queueActive' in block.splitlines()
