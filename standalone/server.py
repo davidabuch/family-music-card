@@ -31,6 +31,9 @@ PLAYER_ALLOWLIST = {
 }
 
 
+NATIVE_SONOS_SESSIONS: set[str] = set()
+
+
 class MAError(RuntimeError):
     """Raised when Music Assistant rejects a command."""
 
@@ -236,13 +239,50 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     if index >= len(entries):
         raise ValueError("Sonos Favorite is no longer available; refresh Favorites")
     entry = entries[index]
-    resources = getattr(entry, "resources", None) or []
-    resource_uri = getattr(resources[0], "uri", None) if resources else None
-    if not resource_uri:
-        raise ValueError("This Sonos Favorite has no playable URI")
-    from soco.data_structures import to_didl_string
+    play_sonos_favorite(speaker, entry)
+    NATIVE_SONOS_SESSIONS.add(queue_id)
 
-    speaker.play_uri(resource_uri, meta=to_didl_string(entry))
+
+def play_sonos_favorite(speaker: Any, favorite: Any) -> None:
+    """Follow the established Sonos favorite playback contract.
+
+    Radio streams use their referenced URI and embedded resource metadata.
+    Albums/playlists/tracks must be enqueued, not passed to play_uri.
+    """
+    reference = favorite.reference
+    uri = reference.get_uri()
+    source = speaker.music_source_from_uri(uri)
+    if source in {"RADIO", "LINE_IN"} or reference.item_class == "object.item.audioItem.audioBook":
+        speaker.play_uri(
+            uri, title=favorite.title, meta=favorite.resource_meta_data or ""
+        )
+    else:
+        speaker.clear_queue()
+        speaker.add_to_queue(reference)
+        speaker.play_from_queue(0)
+
+
+def _native_sonos_transport(queue_id: str, action: str) -> bool:
+    """Use the physical player when MA is not actively managing its queue."""
+    queues = get_queues()
+    queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
+    if (
+        queue_id not in NATIVE_SONOS_SESSIONS
+        and queue
+        and queue.get("state") in {"playing", "paused"}
+    ):
+        return False
+    from soco.discovery import discover
+
+    speaker = next(
+        (sp for sp in (discover(timeout=3) or set()) if sp.uid == queue_id),
+        None,
+    )
+    if speaker is None:
+        return False
+    {"play": speaker.play, "pause": speaker.pause,
+     "next": speaker.next, "previous": speaker.previous}[action]()
+    return True
 
 
 def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
@@ -397,6 +437,10 @@ class Handler(BaseHTTPRequestHandler):
             self._serve_static(path)
         except (MAError, ValueError, json.JSONDecodeError) as err:
             self._send_json({"error": str(err)}, HTTPStatus.BAD_GATEWAY)
+        except Exception as err:
+            # Sonos UPnP failures must return JSON, not drop the HTTP connection.
+            print(f"[family-music] Playback error: {err}", flush=True)
+            self._send_json({"error": f"Sonos playback failed: {err}"}, HTTPStatus.BAD_GATEWAY)
 
     def do_POST(self) -> None:  # noqa: N802
         path = urllib.parse.urlsplit(self.path).path
@@ -420,6 +464,7 @@ class Handler(BaseHTTPRequestHandler):
                         queue_id=queue_id,
                         media=media,
                     )
+                    NATIVE_SONOS_SESSIONS.discard(queue_id)
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/transport":
@@ -434,7 +479,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id or not command:
                     self._send_json({"error": "invalid transport command"}, HTTPStatus.BAD_REQUEST)
                     return
-                result = client.command(command, queue_id=queue_id)
+                if _native_sonos_transport(queue_id, action):
+                    result = {"sonos_direct": True}
+                else:
+                    result = client.command(command, queue_id=queue_id)
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/queue-control":
