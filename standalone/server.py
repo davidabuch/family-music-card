@@ -266,7 +266,11 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     """Use the physical player when MA is not actively managing its queue."""
     queues = get_queues()
     queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
-    if queue_id not in NATIVE_SONOS_SESSIONS and queue and queue.get("state") in {"playing", "paused"}:
+    if (
+        queue_id not in NATIVE_SONOS_SESSIONS
+        and queue
+        and queue.get("state") in {"playing", "paused"}
+    ):
         return False
     from soco.discovery import discover
 
