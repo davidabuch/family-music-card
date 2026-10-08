@@ -100,6 +100,35 @@ function renderPlayerSelect() {
   }
 }
 
+function destinationIsPlaying(player) {
+  if (!player) return false;
+  if (player.state === "playing") return true;
+  return state.queues.some(
+    (queue) =>
+      (queue.queue_id === player.player_id || queue.queue_id === player.active_source) &&
+      queue.state === "playing"
+  );
+}
+
+function destinationActivityMarkup(player, selected = false) {
+  if (destinationIsPlaying(player)) {
+    return '<span class="playing-equalizer" title="Playing" aria-label="Playing"><i></i><i></i><i></i></span>';
+  }
+  return selected
+    ? '<span class="destination-selected" aria-label="Selected">●</span>'
+    : '<span class="destination-activity" aria-hidden="true"></span>';
+}
+
+function updateDestinationActivity() {
+  if (!state.destinationOpen) return;
+  document.querySelectorAll(".destination-option[data-player]").forEach((button) => {
+    const player = state.players.find((item) => item.player_id === button.dataset.player);
+    const slot = button.querySelector(".destination-status");
+    if (!slot || !player) return;
+    slot.innerHTML = destinationActivityMarkup(player, player.player_id === state.selectedPlayerId);
+  });
+}
+
 function formatTime(seconds) {
   const value = Math.max(0, Math.floor(Number(seconds) || 0));
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
@@ -175,6 +204,7 @@ async function refreshState() {
       if (Number(actual) === state.pendingVolume.level || Date.now() >= state.pendingVolume.expiresAt) state.pendingVolume = null;
     }
     renderNow();
+    updateDestinationActivity();
   } catch (error) {
     showToast(error.message, 3000);
   }
@@ -424,7 +454,10 @@ function closeOverlay() {
 
 function renderDestinationOverlay() {
   state.destinationOpen = true; state.balanceOpen = false;
-  const options = state.players.map((p) => `<button class="destination-option ${p.player_id===state.selectedPlayerId?"selected":""}" data-player="${escapeHtml(p.player_id)}"><span>${p.type==="group"?"▣":"◉"}</span><span>${escapeHtml(playerName(p))}</span><span class="check">${p.player_id===state.selectedPlayerId?"●":""}</span></button>`).join("");
+  const options = state.players.map((p) => {
+    const selected = p.player_id === state.selectedPlayerId;
+    return `<button class="destination-option ${selected?"selected":""}" data-player="${escapeHtml(p.player_id)}"><span>${p.type==="group"?"▣":"◉"}</span><span>${escapeHtml(playerName(p))}</span><span class="destination-status">${destinationActivityMarkup(p, selected)}</span></button>`;
+  }).join("");
   $("#overlay").classList.add("open");
   $(".tabbar")?.classList.add("overlay-hidden");
   $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Play in</h3>${options}</div>`;
