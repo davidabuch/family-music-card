@@ -241,3 +241,29 @@ def test_native_sonos_favorites_are_resolved_and_deduplicated(monkeypatch):
         "spotify://playlist/1", "spotify://playlist/2"
     }
     assert len(result["sonos_favorites"]) == 3
+
+
+def test_sonos_favorites_are_visible_even_without_ma_match(monkeypatch):
+    monkeypatch.setattr(standalone.client, "command", lambda *args, **kwargs: [])
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [
+        {"name": "Sonos-only Station", "uri": "sonos-favorite://0"}
+    ])
+    result = standalone.favorites()
+    assert result["sonos_favorites"][0]["name"] == "Sonos-only Station"
+
+
+def test_sonos_favorite_index_preserved(monkeypatch):
+    from types import SimpleNamespace
+
+    entries = [
+        SimpleNamespace(title="First", item_class="", album_art_uri=None),
+        SimpleNamespace(title="", item_class="", album_art_uri=None),
+        SimpleNamespace(title="Third", item_class="", album_art_uri=None),
+    ]
+    speaker = SimpleNamespace(
+        music_library=SimpleNamespace(get_sonos_favorites=lambda: entries))
+    monkeypatch.setattr(standalone, "_sonos_household", lambda: speaker)
+    result = standalone.native_sonos_favorites()
+    assert [item["uri"] for item in result] == [
+        "sonos-favorite://0", "sonos-favorite://2"
+    ]
