@@ -31,6 +31,9 @@ PLAYER_ALLOWLIST = {
 }
 
 
+NATIVE_SONOS_SESSIONS: set[str] = set()
+
+
 class MAError(RuntimeError):
     """Raised when Music Assistant rejects a command."""
 
@@ -237,6 +240,7 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
         raise ValueError("Sonos Favorite is no longer available; refresh Favorites")
     entry = entries[index]
     play_sonos_favorite(speaker, entry)
+    NATIVE_SONOS_SESSIONS.add(queue_id)
 
 
 def play_sonos_favorite(speaker: Any, favorite: Any) -> None:
@@ -262,7 +266,7 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     """Use the physical player when MA is not actively managing its queue."""
     queues = get_queues()
     queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
-    if queue and queue.get("state") in {"playing", "paused"}:
+    if queue_id not in NATIVE_SONOS_SESSIONS and queue and queue.get("state") in {"playing", "paused"}:
         return False
     from soco.discovery import discover
 
@@ -456,6 +460,7 @@ class Handler(BaseHTTPRequestHandler):
                         queue_id=queue_id,
                         media=media,
                     )
+                    NATIVE_SONOS_SESSIONS.discard(queue_id)
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/transport":
