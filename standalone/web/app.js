@@ -152,7 +152,12 @@ function effectiveVolume(player) {
 function renderNow() {
   const player = selectedPlayer();
   const queue = selectedQueue();
-  // Music Assistant may retain the last queue item after a Sonos-native\n  // station/source change. In that case the player media is authoritative.\n  const queueActive = queue?.state === "playing" || queue?.state === "paused";\n  const item = queueActive\n    ? (queue?.current_item || player?.current_media || null)\n    : (player?.current_media || queue?.current_item || null);
+  // Music Assistant may retain the last queue item after a Sonos-native
+  // station/source change. In that case the player media is authoritative.
+  const queueActive = queue?.state === "playing" || queue?.state === "paused";
+  const item = queueActive
+    ? (queue?.current_item || player?.current_media || null)
+    : (player?.current_media || queue?.current_item || null);
   $("#trackTitle").textContent = mediaName(item);
   $("#trackMeta").textContent = mediaArtist(item) || "—";
   $("#destinationName").textContent = playerName(player);
