@@ -14,3 +14,15 @@
   }
   .now-card > .artwork {flex-shrink:0;}
 }
+
+/* Accessible search: retain the microphone and Search button on narrow phones. */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.searchbar{display:flex;align-items:center;gap:8px}
+.searchbar input{min-width:0;flex:1}
+.searchbar .voice-search{flex:0 0 46px;width:46px;height:48px;display:grid;place-items:center;border-radius:14px;background:#292726;color:#fff;padding:0}
+.voice-search svg{width:24px;height:24px}
+.voice-search.listening{background:#ff375f;color:#fff;box-shadow:0 0 0 3px #ff375f55}
+.searchbar #searchButton{min-height:48px;flex-shrink:0}
+.searchbar button:focus-visible,.provider:focus-visible,.tabbar button:focus-visible,.searchbar input:focus-visible{outline:3px solid #fff;outline-offset:2px}
+@media(max-width:375px){.searchbar{gap:5px}.searchbar .voice-search{flex-basis:44px;width:44px}.searchbar #searchButton{padding-left:10px;padding-right:10px}}
+@media(prefers-reduced-motion:reduce){.voice-search,.searchbar button{animation:none;transition:none}}
