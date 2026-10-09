@@ -1,5 +1,5 @@
 name: Family Music
-version: "0.2.17"
+version: "0.2.18"
 slug: family_music
 description: Standalone Family Music PWA backed directly by Music Assistant.
 url: https://github.com/davidabuch/family-music-card
