@@ -389,3 +389,25 @@ def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
         assert "RINCON_TEST" not in standalone.NATIVE_SONOS_SESSIONS
     finally:
         standalone.NATIVE_SONOS_SESSIONS.discard("RINCON_TEST")
+
+
+def test_previous_transport_restarts_active_ma_track(monkeypatch):
+    calls = []
+    monkeypatch.setattr(standalone, "get_queues", lambda: [{"queue_id": "p1", "state": "playing", "elapsed_time": 31}])
+    monkeypatch.setattr(standalone, "get_players", lambda: [{"player_id": "p1"}])
+    monkeypatch.setattr(standalone, "NATIVE_SONOS_SESSIONS", set())
+    monkeypatch.setattr(standalone.client, "command", lambda name, **kwargs: calls.append((name, kwargs)))
+    result = standalone.previous_transport("p1")
+    assert result["restarted"] is True
+    assert calls == [("player_queues/seek", {"queue_id": "p1", "position": 0})]
+
+
+def test_previous_transport_navigates_at_start_of_ma_track(monkeypatch):
+    calls = []
+    monkeypatch.setattr(standalone, "get_queues", lambda: [{"queue_id": "p1", "state": "paused", "elapsed_time": 2}])
+    monkeypatch.setattr(standalone, "get_players", lambda: [{"player_id": "p1"}])
+    monkeypatch.setattr(standalone, "NATIVE_SONOS_SESSIONS", set())
+    monkeypatch.setattr(standalone.client, "command", lambda name, **kwargs: calls.append(name))
+    result = standalone.previous_transport("p1")
+    assert result["restarted"] is False
+    assert calls == ["player_queues/previous"]
