@@ -364,8 +364,18 @@ def sonos_playback_modes(queue_id: str) -> dict[str, Any]:
     coordinator = getattr(getattr(speaker, "group", None), "coordinator", None)
     speaker = coordinator or speaker
     mode = str(speaker.play_mode or "NORMAL").upper()
+    try:
+        actions = speaker.avTransport.GetCurrentTransportActions(
+            [("InstanceID", 0)]
+        ).get("Actions", "")
+        available_actions = {action.strip().lower() for action in actions.split(",")}
+    except Exception:
+        available_actions = set()
     return {
         "available": True,
+        "can_previous": (
+            "previous" in available_actions or "seek" in available_actions
+        ) if available_actions else None,
         "shuffle": mode.startswith("SHUFFLE"),
         "repeat": (
             "one" if mode.endswith("ONE") else
