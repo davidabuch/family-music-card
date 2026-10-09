@@ -453,3 +453,29 @@ def test_native_previous_uses_physical_position_not_zeroed_media_elapsed(monkeyp
     assert result["restarted"] is True
     assert speaker.seeks == ["0:00:00"]
     assert speaker.previous_calls == 0
+
+
+def test_previous_uses_sonos_group_coordinator(monkeypatch):
+    import sys
+    import types
+
+    class Coordinator:
+        def __init__(self):
+            self.seeks = []
+        def get_current_track_info(self):
+            return {"position": "0:00:45"}
+        def seek(self, position):
+            self.seeks.append(position)
+
+    coordinator = Coordinator()
+    member = types.SimpleNamespace(
+        uid="p1", group=types.SimpleNamespace(coordinator=coordinator)
+    )
+    discovery = types.ModuleType("soco.discovery")
+    discovery.discover = lambda timeout: {member}
+    monkeypatch.setitem(sys.modules, "soco.discovery", discovery)
+    monkeypatch.setattr(standalone, "get_queues", lambda: [])
+    monkeypatch.setattr(standalone, "get_players", lambda: [])
+    result = standalone.previous_transport("p1")
+    assert result["restarted"] is True
+    assert coordinator.seeks == ["0:00:00"]
