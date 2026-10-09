@@ -328,17 +328,25 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     )
     if speaker is None:
         raise ValueError("Selected Sonos speaker is unavailable")
-    media = (player or {}).get("current_media") or {}
-    elapsed = float(media.get("elapsed_time") or 0)
+    # MA's current_media.elapsed_time can remain zero throughout playback.
+    # Prefer the physical Sonos position; MA player.elapsed_time is a fallback.
+    track = speaker.get_current_track_info() or {}
+    position = str(track.get("position") or "")
+    parts = position.split(":")
+    if len(parts) == 3 and all(part.isdigit() for part in parts):
+        elapsed = sum(int(part) * factor for part, factor in zip(parts, (3600, 60, 1)))
+    else:
+        elapsed = float((player or {}).get("elapsed_time") or 0)
     if elapsed >= 3:
         speaker.seek("0:00:00")
         return {"sonos_direct": True, "restarted": True}
     try:
         speaker.previous()
     except Exception as err:
-        code = getattr(err, "error_code", None)
-        if str(code) == "701":
-            return {"sonos_direct": True, "at_queue_start": True}
+        if str(getattr(err, "error_code", None)) == "701":
+            raise ValueError(
+                "This Sonos source has no available previous track"
+            ) from err
         raise
     return {"sonos_direct": True, "restarted": False}
 
