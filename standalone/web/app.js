@@ -9,6 +9,9 @@ const state = {
   pendingMute: null,
   pendingVolume: null,
   seeking: false,
+  nativeModes: null,
+  nativeModesPlayerId: null,
+  nativeModesFetchedAt: 0,
   destinationOpen: false,
   balanceOpen: false,
 };
@@ -39,6 +42,15 @@ function selectedQueue() {
     state.queues.find((queue) => queue.queue_id === player.active_source) ||
     null
   );
+}
+
+function maQueueActive(queue = selectedQueue(), player = selectedPlayer()) {
+  if (!queue || !["playing", "paused"].includes(queue.state)) return false;
+  const queueUri = queue.current_item?.media_item?.uri;
+  const physicalUri = player?.current_media?.uri;
+  // External Sonos playback can leave a stale MA queue marked active.
+  if (queueUri && physicalUri && queueUri !== physicalUri) return false;
+  return true;
 }
 
 function queueId() {
@@ -195,9 +207,34 @@ function renderNow() {
   $("#elapsed").textContent = formatTime(position);
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
 
-  $("#shuffle").classList.toggle("active", Boolean(queue?.shuffle_enabled));
-  $("#repeat").classList.toggle("active", queue?.repeat_mode && queue.repeat_mode !== "off");
-  $("#repeat").textContent = queue?.repeat_mode === "one" ? "↔¹" : "↔";
+  const queueControllable = maQueueActive(queue, player);
+  const native = !queueControllable && state.nativeModesPlayerId === player?.player_id
+    ? state.nativeModes : null;
+  const modesAvailable = queueControllable || Boolean(native?.available);
+  const previous = $("#previous");
+  // The physical Sonos transport is authoritative about station restrictions.
+  const physicalCapabilities = state.nativeModesPlayerId === player?.player_id
+    ? state.nativeModes : null;
+  previous.disabled = physicalCapabilities?.can_previous === false;
+  previous.title = previous.disabled
+    ? "Previous unavailable for this Sonos source" : "Previous";
+  previous.setAttribute("aria-label", previous.title);
+  const shuffle = $("#shuffle");
+  const repeat = $("#repeat");
+  shuffle.disabled = !modesAvailable;
+  repeat.disabled = !modesAvailable;
+  const shuffleOn = queueControllable ? Boolean(queue.shuffle_enabled) : Boolean(native?.shuffle);
+  shuffle.classList.toggle("active", modesAvailable && shuffleOn);
+  const repeatMode = queueControllable ? queue.repeat_mode || "off" : native?.repeat || "off";
+  repeat.classList.toggle("active", repeatMode !== "off");
+  repeat.innerHTML = repeatMode === "one"
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/><text x="12" y="15" font-size="9" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/></svg>';
+  shuffle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h2c6 0 8-12 14-12h4M2 6h2c2.7 0 4.5 2.4 6 5m4 2c1.5 2.6 3.3 5 6 5h2"/></svg>';
+  repeat.setAttribute("aria-label", "Repeat " + (repeatMode === "one" ? "one" : repeatMode === "all" ? "all" : "off"));
+  repeat.title = repeat.getAttribute("aria-label");
+  shuffle.setAttribute("aria-label", "Shuffle " + (modesAvailable && shuffleOn ? "on" : "off"));
+  shuffle.title = shuffle.getAttribute("aria-label");
 }
 
 async function refreshState() {
@@ -222,6 +259,7 @@ async function refreshState() {
     }
     renderNow();
     updateDestinationActivity();
+    void refreshNativeModes();
   } catch (error) {
     showToast(error.message, 3000);
   }
@@ -434,20 +472,50 @@ async function toggleMute() {
 async function queueControl(action, value) {
   const qid = queueId();
   if (!qid) return;
+  const queue = selectedQueue();
+  const maActive = maQueueActive(queue);
+  const endpoint = maActive ? "/api/queue-control" : "/api/native-mode-control";
   try {
-    await api("/api/queue-control", {method:"POST", body:JSON.stringify({queue_id:qid, action, value})});
+    await api(endpoint, {method:"POST", body:JSON.stringify({queue_id:qid, action, value})});
+    state.nativeModesFetchedAt = 0;
     await refreshState();
+    await refreshNativeModes();
   } catch (error) { showToast(error.message, 3000); }
 }
 
 function toggleShuffle() {
-  queueControl("shuffle", !Boolean(selectedQueue()?.shuffle_enabled));
+  const queue = selectedQueue();
+  const maActive = queue && ["playing", "paused"].includes(queue.state);
+  const current = maActive ? Boolean(queue.shuffle_enabled) : Boolean(state.nativeModes?.shuffle);
+  queueControl("shuffle", !current);
 }
 
 function toggleRepeat() {
-  const current = selectedQueue()?.repeat_mode || "off";
-  const next = current === "off" ? "all" : current === "all" ? "one" : "off";
+  const queue = selectedQueue();
+  const maActive = queue && ["playing", "paused"].includes(queue.state);
+  const current = maActive ? queue.repeat_mode || "off" : state.nativeModes?.repeat || "off";
+  const next = current === "off" ? "one" : current === "one" ? "all" : "off";
   queueControl("repeat", next);
+}
+
+async function refreshNativeModes() {
+  const player = selectedPlayer();
+  if (!player) return;
+  if (Date.now() - state.nativeModesFetchedAt < 12000
+      && state.nativeModesPlayerId === player.player_id) return;
+  state.nativeModesFetchedAt = Date.now();
+  state.nativeModesPlayerId = player.player_id;
+  if (!player.player_id.startsWith("RINCON_")) {
+    state.nativeModes = null;
+    return;
+  }
+  try {
+    const modes = await api("/api/native-modes?queue_id=" + encodeURIComponent(player.player_id));
+    if (state.nativeModesPlayerId === player.player_id) state.nativeModes = modes;
+  } catch (_) {
+    state.nativeModes = null;
+  }
+  renderNow();
 }
 
 function seekTo(percent) {

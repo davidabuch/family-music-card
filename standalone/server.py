@@ -351,6 +351,71 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     return {"sonos_direct": True, "restarted": False}
 
 
+def sonos_playback_modes(queue_id: str) -> dict[str, Any]:
+    """Read native Sonos play mode without modifying playback."""
+    from soco.discovery import discover
+
+    speaker = next(
+        (sp for sp in (discover(timeout=3) or set()) if sp.uid == queue_id),
+        None,
+    )
+    if speaker is None:
+        return {"available": False}
+    coordinator = getattr(getattr(speaker, "group", None), "coordinator", None)
+    speaker = coordinator or speaker
+    mode = str(speaker.play_mode or "NORMAL").upper()
+    try:
+        actions = speaker.avTransport.GetCurrentTransportActions(
+            [("InstanceID", 0)]
+        ).get("Actions", "")
+        available_actions = {action.strip().lower() for action in actions.split(",")}
+    except Exception:
+        available_actions = set()
+    return {
+        "available": True,
+        "can_previous": (
+            "previous" in available_actions or "seek" in available_actions
+        ) if available_actions else None,
+        "shuffle": mode.startswith("SHUFFLE"),
+        "repeat": (
+            "one" if mode.endswith("ONE") else
+            "all" if "REPEAT" in mode else "off"
+        ),
+    }
+
+
+def set_sonos_playback_mode(queue_id: str, action: str, value: Any) -> dict[str, Any]:
+    from soco.discovery import discover
+
+    speaker = next(
+        (sp for sp in (discover(timeout=3) or set()) if sp.uid == queue_id),
+        None,
+    )
+    if speaker is None:
+        raise ValueError("Selected Sonos speaker is unavailable")
+    coordinator = getattr(getattr(speaker, "group", None), "coordinator", None)
+    speaker = coordinator or speaker
+    current = str(speaker.play_mode or "NORMAL").upper()
+    shuffle = current.startswith("SHUFFLE")
+    repeat = "one" if current.endswith("ONE") else "all" if "REPEAT" in current else "off"
+    if action == "shuffle" and isinstance(value, bool):
+        shuffle = value
+    elif action == "repeat" and value in {"off", "all", "one"}:
+        repeat = value
+    else:
+        raise ValueError("Invalid playback mode")
+    # SoCo uses Sonos' native AVTransport play modes.
+    target = (
+        "SHUFFLE_REPEAT_ONE" if shuffle and repeat == "one" else
+        "SHUFFLE" if shuffle and repeat == "all" else
+        "SHUFFLE_NOREPEAT" if shuffle else
+        "REPEAT_ONE" if repeat == "one" else
+        "REPEAT_ALL" if repeat == "all" else "NORMAL"
+    )
+    speaker.play_mode = target
+    return {"sonos_direct": True, "mode": target}
+
+
 def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
                           sonos_items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Resolve Sonos titles to MA playable URIs; never expose unplayable entries."""
@@ -480,6 +545,11 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state":
                 self._send_json({"players": get_players(), "queues": get_queues()})
                 return
+            if path == "/api/native-modes":
+                queue_id = self._query().get("queue_id", [""])[0]
+                modes = sonos_playback_modes(queue_id) if queue_id else {"available": False}
+                self._send_json(modes)
+                return
             if path == "/api/favorites":
                 self._send_json(favorites())
                 return
@@ -551,6 +621,13 @@ class Handler(BaseHTTPRequestHandler):
                     result = {"sonos_direct": True}
                 else:
                     result = client.command(command, queue_id=queue_id)
+                self._send_json({"ok": True, "result": result})
+                return
+            if path == "/api/native-mode-control":
+                queue_id = str(body.get("queue_id") or "")
+                result = set_sonos_playback_mode(
+                    queue_id, str(body.get("action") or ""), body.get("value")
+                )
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/queue-control":
