@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.19
+
+- Show standard Repeat and Shuffle icons in their correct left/right positions.
+- Cycle Repeat off, one, all and reflect active mode.
+- Support Sonos-native playback modes when the Music Assistant queue is inactive.
+- Grey out Previous when physical Sonos AVTransport reports it unsupported.
+- Avoid using stale Music Assistant queue modes for external Sonos sources.
+
 ## 0.2.18
 
 - Use actual physical Sonos track position for restart-first Previous behavior.
