@@ -315,8 +315,10 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     if ma_active:
         elapsed = float(queue.get("elapsed_time") or 0)
         if elapsed >= 3:
-            return {"result": client.command("player_queues/seek", queue_id=queue_id, position=0), "restarted": True}
-        return {"result": client.command("player_queues/previous", queue_id=queue_id), "restarted": False}
+            result = client.command("player_queues/seek", queue_id=queue_id, position=0)
+            return {"result": result, "restarted": True}
+        result = client.command("player_queues/previous", queue_id=queue_id)
+        return {"result": result, "restarted": False}
 
     from soco.discovery import discover
 
