@@ -195,9 +195,22 @@ function renderNow() {
   $("#elapsed").textContent = formatTime(position);
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
 
-  $("#shuffle").classList.toggle("active", Boolean(queue?.shuffle_enabled));
-  $("#repeat").classList.toggle("active", queue?.repeat_mode && queue.repeat_mode !== "off");
-  $("#repeat").textContent = queue?.repeat_mode === "one" ? "↔¹" : "↔";
+  const queueControllable = Boolean(queue && ["playing", "paused"].includes(queue.state));
+  const shuffle = $("#shuffle");
+  const repeat = $("#repeat");
+  shuffle.disabled = !queueControllable;
+  repeat.disabled = !queueControllable;
+  shuffle.classList.toggle("active", queueControllable && Boolean(queue.shuffle_enabled));
+  const repeatMode = queueControllable ? queue.repeat_mode || "off" : "off";
+  repeat.classList.toggle("active", repeatMode !== "off");
+  repeat.innerHTML = repeatMode === "one"
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/><text x="12" y="15" font-size="9" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/></svg>';
+  shuffle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m18 14 4 4-4 4M18 2l4 4-4 4M2 18h2c6 0 8-12 14-12h4M2 6h2c2.7 0 4.5 2.4 6 5m4 2c1.5 2.6 3.3 5 6 5h2"/></svg>';
+  repeat.setAttribute("aria-label", "Repeat " + (repeatMode === "one" ? "one" : repeatMode === "all" ? "all" : "off"));
+  repeat.title = repeat.getAttribute("aria-label");
+  shuffle.setAttribute("aria-label", "Shuffle " + (queueControllable && queue.shuffle_enabled ? "on" : "off"));
+  shuffle.title = shuffle.getAttribute("aria-label");
 }
 
 async function refreshState() {
@@ -446,7 +459,7 @@ function toggleShuffle() {
 
 function toggleRepeat() {
   const current = selectedQueue()?.repeat_mode || "off";
-  const next = current === "off" ? "all" : current === "all" ? "one" : "off";
+  const next = current === "off" ? "one" : current === "one" ? "all" : "off";
   queueControl("repeat", next);
 }
 
