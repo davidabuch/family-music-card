@@ -453,3 +453,37 @@ def test_native_previous_uses_physical_position_not_zeroed_media_elapsed(monkeyp
     assert result["restarted"] is True
     assert speaker.seeks == ["0:00:00"]
     assert speaker.previous_calls == 0
+
+
+def test_transport_mode_controls_have_correct_order_and_native_routes():
+    index = (ROOT / "standalone/web/index.html").read_text()
+    js = (ROOT / "standalone/web/app.js").read_text()
+    server = (ROOT / "standalone/server.py").read_text()
+    assert index.index('id="repeat"') < index.index('id="previous"')
+    assert index.index('id="next"') < index.index('id="shuffle"')
+    assert 'current === "off" ? "one"' in js
+    assert '"/api/native-mode-control"' in js
+    assert '"/api/native-modes"' in server
+    assert '"can_previous"' in server
+
+
+def test_native_mode_mapping_preserves_repeat_and_shuffle(monkeypatch):
+    import sys
+    import types
+
+    class Speaker:
+        uid = "p1"
+        play_mode = "NORMAL"
+
+    speaker = Speaker()
+    discovery = types.ModuleType("soco.discovery")
+    discovery.discover = lambda timeout: {speaker}
+    monkeypatch.setitem(sys.modules, "soco.discovery", discovery)
+    standalone.set_sonos_playback_mode("p1", "repeat", "one")
+    assert speaker.play_mode == "REPEAT_ONE"
+    standalone.set_sonos_playback_mode("p1", "shuffle", True)
+    assert speaker.play_mode == "SHUFFLE_REPEAT_ONE"
+    standalone.set_sonos_playback_mode("p1", "repeat", "all")
+    assert speaker.play_mode == "SHUFFLE"
+    standalone.set_sonos_playback_mode("p1", "repeat", "off")
+    assert speaker.play_mode == "SHUFFLE_NOREPEAT"
