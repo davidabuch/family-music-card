@@ -297,6 +297,50 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     return True
 
 
+def previous_transport(queue_id: str) -> dict[str, Any]:
+    """Restart the current track unless it is already near its beginning.
+
+    Select the same playback authority for both seeking and navigation.
+    A Sonos source without a previous item may reject Previous with 701;
+    that is an end-of-queue condition, not a server failure.
+    """
+    queues = get_queues()
+    queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
+    players = get_players()
+    player = next((p for p in players if p.get("player_id") == queue_id), None)
+    ma_active = bool(
+        queue and queue.get("state") in {"playing", "paused"}
+        and queue_id not in NATIVE_SONOS_SESSIONS
+    )
+    if ma_active:
+        elapsed = float(queue.get("elapsed_time") or 0)
+        if elapsed >= 3:
+            return {"result": client.command("player_queues/seek", queue_id=queue_id, position=0), "restarted": True}
+        return {"result": client.command("player_queues/previous", queue_id=queue_id), "restarted": False}
+
+    from soco.discovery import discover
+
+    speaker = next(
+        (sp for sp in (discover(timeout=3) or set()) if sp.uid == queue_id),
+        None,
+    )
+    if speaker is None:
+        raise ValueError("Selected Sonos speaker is unavailable")
+    media = (player or {}).get("current_media") or {}
+    elapsed = float(media.get("elapsed_time") or 0)
+    if elapsed >= 3:
+        speaker.seek("0:00:00")
+        return {"sonos_direct": True, "restarted": True}
+    try:
+        speaker.previous()
+    except Exception as err:
+        code = getattr(err, "error_code", None)
+        if str(code) == "701":
+            return {"sonos_direct": True, "at_queue_start": True}
+        raise
+    return {"sonos_direct": True, "restarted": False}
+
+
 def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
                           sonos_items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
     """Resolve Sonos titles to MA playable URIs; never expose unplayable entries."""
@@ -491,7 +535,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id or not command:
                     self._send_json({"error": "invalid transport command"}, HTTPStatus.BAD_REQUEST)
                     return
-                if _native_sonos_transport(queue_id, action):
+                if action == "previous":
+                    result = previous_transport(queue_id)
+                elif _native_sonos_transport(queue_id, action):
                     result = {"sonos_direct": True}
                 else:
                     result = client.command(command, queue_id=queue_id)
