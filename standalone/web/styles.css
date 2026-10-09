@@ -26,3 +26,8 @@
 .searchbar button:focus-visible,.provider:focus-visible,.tabbar button:focus-visible,.searchbar input:focus-visible{outline:3px solid #fff;outline-offset:2px}
 @media(max-width:375px){.searchbar{gap:5px}.searchbar .voice-search{flex-basis:44px;width:44px}.searchbar #searchButton{padding-left:10px;padding-right:10px}}
 @media(prefers-reduced-motion:reduce){.voice-search,.searchbar button{animation:none;transition:none}}
+
+/* Playback mode controls use standard outline icons and disabled states. */
+.transport .mode-button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+.transport button:disabled{opacity:.3;cursor:not-allowed;filter:grayscale(1)}
+.transport .mode-button.active{color:#67b7ff}
