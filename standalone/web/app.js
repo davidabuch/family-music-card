@@ -202,6 +202,12 @@ function renderNow() {
   const native = !queueControllable && state.nativeModesPlayerId === player?.player_id
     ? state.nativeModes : null;
   const modesAvailable = queueControllable || Boolean(native?.available);
+  const previous = $("#previous");
+  // The physical Sonos transport is authoritative about station restrictions.
+  previous.disabled = native?.can_previous === false;
+  previous.title = previous.disabled
+    ? "Previous unavailable for this Sonos source" : "Previous";
+  previous.setAttribute("aria-label", previous.title);
   const shuffle = $("#shuffle");
   const repeat = $("#repeat");
   shuffle.disabled = !modesAvailable;
