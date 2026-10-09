@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.18
+
+- Use actual physical Sonos track position for restart-first Previous behavior.
+- Surface unsupported previous navigation as an error instead of silent success.
+- Add a regression test for Music Assistant media elapsed time remaining zero.
+
 ## 0.2.17
 
 - Restart the current track when Previous is pressed after three seconds of playback.
