@@ -328,6 +328,10 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     )
     if speaker is None:
         raise ValueError("Selected Sonos speaker is unavailable")
+    # Group members expose metadata, but transport belongs to the coordinator.
+    coordinator = getattr(getattr(speaker, "group", None), "coordinator", None)
+    if coordinator is not None:
+        speaker = coordinator
     # MA's current_media.elapsed_time can remain zero throughout playback.
     # Prefer the physical Sonos position; MA player.elapsed_time is a fallback.
     track = speaker.get_current_track_info() or {}
@@ -338,7 +342,15 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     else:
         elapsed = float((player or {}).get("elapsed_time") or 0)
     if elapsed >= 3:
-        speaker.seek("0:00:00")
+        try:
+            speaker.seek("0:00:00")
+        except Exception as err:
+            if str(getattr(err, "error_code", None)) == "701":
+                raise ValueError(
+                    "This Sonos playback source does not support seeking. "
+                    "Restart is unavailable for this source."
+                ) from err
+            raise
         return {"sonos_direct": True, "restarted": True}
     try:
         speaker.previous()
