@@ -44,6 +44,15 @@ function selectedQueue() {
   );
 }
 
+function maQueueActive(queue = selectedQueue(), player = selectedPlayer()) {
+  if (!queue || !["playing", "paused"].includes(queue.state)) return false;
+  const queueUri = queue.current_item?.media_item?.uri;
+  const physicalUri = player?.current_media?.uri;
+  // External Sonos playback can leave a stale MA queue marked active.
+  if (queueUri && physicalUri && queueUri !== physicalUri) return false;
+  return true;
+}
+
 function queueId() {
   return selectedQueue()?.queue_id || selectedPlayer()?.player_id || null;
 }
@@ -198,7 +207,7 @@ function renderNow() {
   $("#elapsed").textContent = formatTime(position);
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
 
-  const queueControllable = Boolean(queue && ["playing", "paused"].includes(queue.state));
+  const queueControllable = maQueueActive(queue, player);
   const native = !queueControllable && state.nativeModesPlayerId === player?.player_id
     ? state.nativeModes : null;
   const modesAvailable = queueControllable || Boolean(native?.available);
@@ -464,7 +473,7 @@ async function queueControl(action, value) {
   const qid = queueId();
   if (!qid) return;
   const queue = selectedQueue();
-  const maActive = queue && ["playing", "paused"].includes(queue.state);
+  const maActive = maQueueActive(queue);
   const endpoint = maActive ? "/api/queue-control" : "/api/native-mode-control";
   try {
     await api(endpoint, {method:"POST", body:JSON.stringify({queue_id:qid, action, value})});
