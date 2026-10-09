@@ -547,7 +547,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/native-modes":
                 queue_id = self._query().get("queue_id", [""])[0]
-                self._send_json(sonos_playback_modes(queue_id) if queue_id else {"available": False})
+                modes = sonos_playback_modes(queue_id) if queue_id else {"available": False}
+                self._send_json(modes)
                 return
             if path == "/api/favorites":
                 self._send_json(favorites())
