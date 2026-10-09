@@ -468,9 +468,11 @@ def test_previous_uses_sonos_group_coordinator(monkeypatch):
             self.seeks.append(position)
 
     coordinator = Coordinator()
-    member = types.SimpleNamespace(
-        uid="p1", group=types.SimpleNamespace(coordinator=coordinator)
-    )
+    class Member:
+        uid = "p1"
+        group = types.SimpleNamespace(coordinator=coordinator)
+
+    member = Member()
     discovery = types.ModuleType("soco.discovery")
     discovery.discover = lambda timeout: {member}
     monkeypatch.setitem(sys.modules, "soco.discovery", discovery)
