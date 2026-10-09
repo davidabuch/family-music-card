@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.17
+
+- Restart the current track when Previous is pressed after three seconds of playback.
+- Navigate to the preceding track when already within the first three seconds.
+- Handle unsupported native Sonos Previous at the beginning of a queue without a dropped HTTP connection.
+- Refresh installed PWA assets for the updated playback behavior.
+
 ## 0.2.7
 
 - Discover native Sonos Favorites directly over the LAN using SoCo, without HA Core authentication.
