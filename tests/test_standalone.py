@@ -419,3 +419,37 @@ def test_previous_transport_navigates_at_start_of_ma_track(monkeypatch):
     result = standalone.previous_transport("p1")
     assert result["restarted"] is False
     assert calls == ["player_queues/previous"]
+
+
+def test_native_previous_uses_physical_position_not_zeroed_media_elapsed(monkeypatch):
+    import sys
+    import types
+
+    class Speaker:
+        uid = "p1"
+        def __init__(self):
+            self.seeks = []
+            self.previous_calls = 0
+        def get_current_track_info(self):
+            return {"position": "0:01:22"}
+        def seek(self, position):
+            self.seeks.append(position)
+        def previous(self):
+            self.previous_calls += 1
+
+    speaker = Speaker()
+    soco = types.ModuleType("soco")
+    discovery = types.ModuleType("soco.discovery")
+    discovery.discover = lambda timeout: {speaker}
+    monkeypatch.setitem(sys.modules, "soco", soco)
+    monkeypatch.setitem(sys.modules, "soco.discovery", discovery)
+    monkeypatch.setattr(standalone, "get_queues", lambda: [])
+    monkeypatch.setattr(
+        standalone, "get_players",
+        lambda: [{"player_id": "p1", "elapsed_time": 0,
+                  "current_media": {"elapsed_time": 0}}],
+    )
+    result = standalone.previous_transport("p1")
+    assert result["restarted"] is True
+    assert speaker.seeks == ["0:00:00"]
+    assert speaker.previous_calls == 0
