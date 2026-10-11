@@ -100,14 +100,31 @@ function artworkUrl(value) {
   }
 }
 
+function artworkFromImage(image) {
+  if (typeof image === "string") return artworkUrl(image);
+  if (!image || typeof image !== "object") return "";
+  // MA returns Image objects with path and proxy_id, not just URL strings.
+  // Prefer its authenticated imageproxy endpoint for every provider (including
+  // Apple Music and Spotify), so browser/CDN/network differences cannot break art.
+  if (typeof image.proxy_id === "string" && /^[a-f0-9]{64}$/i.test(image.proxy_id)) {
+    return "/api/artwork?path=" +
+      encodeURIComponent("/imageproxy/" + image.proxy_id + "?size=512&fmt=jpg");
+  }
+  return artworkUrl(image.path);
+}
+
 function mediaImage(item) {
   const media = item?.media_item || item || {};
-  if (typeof media.image === "string") return artworkUrl(media.image);
-  if (typeof media.image_url === "string") return artworkUrl(media.image_url);
   const images = media.metadata?.images;
-  if (Array.isArray(images)) {
-    const match = images.find((image) => typeof image?.path === "string");
-    if (match) return artworkUrl(match.path);
+  const candidates = [
+    item?.image,
+    media.image,
+    media.image_url,
+    ...(Array.isArray(images) ? images : []),
+  ];
+  for (const candidate of candidates) {
+    const url = artworkFromImage(candidate);
+    if (url) return url;
   }
   return "";
 }
@@ -308,7 +325,7 @@ function itemMarkup(item, row = false) {
   const uri = escapeHtml(item?.uri || "");
   const name = escapeHtml(item?.name || "Music");
   const subtitle = escapeHtml(itemSubtitle(item));
-  const imageUrl = artworkUrl(item?.image);
+  const imageUrl = mediaImage(item);
   const image = imageUrl
     ? `<img src="${escapeHtml(imageUrl)}" alt="">`
     : "<span>♪</span>";
