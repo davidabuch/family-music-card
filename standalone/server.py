@@ -558,7 +558,9 @@ class Handler(BaseHTTPRequestHandler):
                 if (player.get("device_info") or {}).get("manufacturer") == "SONOS"
             }
             if host not in permitted or not host or parsed.path != "/getaa":
-                self._send_json({"error": "unrecognized Sonos artwork source"}, HTTPStatus.BAD_REQUEST)
+                self._send_json(
+                    {"error": "unrecognized Sonos artwork source"}, HTTPStatus.BAD_REQUEST
+                )
                 return
             origin = f"http://{host}:1400"
             headers = {}
@@ -566,14 +568,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
                 content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
-                if content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"):
-                    self._send_json({"error": "upstream did not return an image"}, HTTPStatus.BAD_GATEWAY)
+                if content_type not in (
+                    "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"
+                ):
+                    self._send_json(
+                        {"error": "upstream did not return an image"}, HTTPStatus.BAD_GATEWAY
+                    )
                     return
                 content = response.read(5 * 1024 * 1024 + 1)
                 if len(content) > 5 * 1024 * 1024:
                     self._send_json({"error": "artwork exceeds size limit"}, HTTPStatus.BAD_GATEWAY)
                     return
-        except (urllib.error.URLError, TimeoutError, ValueError) as err:
+        except (urllib.error.URLError, TimeoutError, ValueError):
             self._send_json({"error": "artwork unavailable"}, HTTPStatus.BAD_GATEWAY)
             return
 
