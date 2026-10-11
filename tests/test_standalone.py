@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.22"' in app_config
+    assert 'version: "0.2.23"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -533,3 +533,15 @@ def test_sonos_station_artwork_fallback():
     assert 'provider: "apple"' in js
     assert "norm(entry.name) === norm(title)" in js
     assert "imageNode.isConnected" in js
+
+
+def test_native_sonos_artwork_resolved_server_side():
+    import importlib.util
+    import unittest.mock as mock
+    spec = importlib.util.spec_from_file_location("family_music_server_art", ROOT / "standalone/server.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    players = [{"current_media": {"title": "Heaven", "artist": "John Legend", "image_url": "http://192.168.1.17:1400/getaa?s=1"}}]
+    with mock.patch.object(module, "search", return_value={"tracks": [{"name": "Heaven", "artists": [{"name": "John Legend"}], "image": "https://example.com/art.jpg"}]}):
+        module.resolve_sonos_artwork(players)
+    assert players[0]["current_media"]["image_url"] == "https://example.com/art.jpg"
