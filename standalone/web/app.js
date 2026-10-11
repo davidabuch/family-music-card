@@ -76,14 +76,34 @@ function mediaArtist(item) {
   return media.artist || media.artist_name || media.album?.name || "";
 }
 
+function artworkUrl(value) {
+  if (typeof value !== "string" || !value) return "";
+  try {
+    const url = new URL(value, window.location.href);
+    if (url.origin === window.location.origin) return url.href;
+    const host = url.hostname.toLowerCase();
+    const isPrivateHost = host === "localhost" || host.endsWith(".local") ||
+      /^127\./.test(host) || /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host);
+    if (isPrivateHost && /^\/(imageproxy|api\/imageproxy|api\/image)(\/|\?|$)/.test(url.pathname)) {
+      return "/api/artwork?path=" + encodeURIComponent(url.pathname + url.search);
+    }
+    if (url.protocol === "https:") return url.href;
+    return "";
+  } catch {
+    return "";
+  }
+}
+
 function mediaImage(item) {
   const media = item?.media_item || item || {};
-  if (typeof media.image === "string") return media.image;
-  if (typeof media.image_url === "string") return media.image_url;
+  if (typeof media.image === "string") return artworkUrl(media.image);
+  if (typeof media.image_url === "string") return artworkUrl(media.image_url);
   const images = media.metadata?.images;
   if (Array.isArray(images)) {
     const match = images.find((image) => typeof image?.path === "string");
-    if (match) return match.path;
+    if (match) return artworkUrl(match.path);
   }
   return "";
 }
@@ -284,8 +304,9 @@ function itemMarkup(item, row = false) {
   const uri = escapeHtml(item?.uri || "");
   const name = escapeHtml(item?.name || "Music");
   const subtitle = escapeHtml(itemSubtitle(item));
-  const image = item?.image
-    ? `<img src="${escapeHtml(item.image)}" alt="">`
+  const imageUrl = artworkUrl(item?.image);
+  const image = imageUrl
+    ? `<img src="${escapeHtml(imageUrl)}" alt="">`
     : "<span>♪</span>";
   if (row) {
     return `<button class="recent-item playable" data-uri="${uri}">
