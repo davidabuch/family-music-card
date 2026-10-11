@@ -532,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
             or path.startswith("//")
             or parsed.scheme
             or parsed.netloc
-            or not parsed.path.startswith(("/imageproxy", "/api/imageproxy", "/api/image"))
+            or not any(\n                parsed.path == prefix or parsed.path.startswith(prefix + "/")\n                for prefix in ("/imageproxy", "/api/imageproxy", "/api/image")\n            )
         ):
             self._send_json({"error": "invalid artwork path"}, HTTPStatus.BAD_REQUEST)
             return
