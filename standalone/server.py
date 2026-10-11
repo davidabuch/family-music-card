@@ -502,6 +502,47 @@ def search(query: str, provider: str = "all", limit: int = 40) -> dict[str, list
     }
 
 
+def resolve_sonos_artwork(players: list[dict[str, Any]]) -> None:
+    """Replace inaccessible Sonos /getaa artwork with MA-searchable track art.
+
+    Only enrich native Sonos sources, never change queue playback or other
+    players. Search is bounded to one best matching track per unique song.
+    """
+    cache: dict[tuple[str, str], str | None] = {}
+    for player in players:
+        media = player.get("current_media")
+        if not isinstance(media, dict):
+            continue
+        original = media.get("image_url")
+        if not isinstance(original, str):
+            continue
+        parsed = urllib.parse.urlsplit(original)
+        if parsed.port != 1400 or parsed.path != "/getaa":
+            continue
+        title, artist = media.get("title"), media.get("artist")
+        if not isinstance(title, str) or not isinstance(artist, str) or not title or not artist:
+            continue
+        key = (title.casefold().strip(), artist.casefold().strip())
+        if key not in cache:
+            cache[key] = None
+            try:
+                matches = search(title + " " + artist, provider="apple", limit=8).get("tracks", [])
+                for track in matches:
+                    if str(track.get("name", "")).casefold().strip() != key[0]:
+                        continue
+                    artists = track.get("artists") or []
+                    if not any(str(a.get("name", "")).casefold().strip() == key[1] for a in artists):
+                        continue
+                    image = track.get("image")
+                    if isinstance(image, str) and image.startswith("https://"):
+                        cache[key] = image
+                        break
+            except (MAError, ValueError, KeyError) as err:
+                print("[family-music] Native artwork lookup unavailable: " + str(err), flush=True)
+        if cache[key]:
+            media["image_url"] = cache[key]
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "FamilyMusic/0.1"
 
@@ -620,7 +661,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._serve_artwork()
                 return
             if path == "/api/state":
-                self._send_json({"players": get_players(), "queues": get_queues()})
+                players = get_players()
+                resolve_sonos_artwork(players)
+                self._send_json({"players": players, "queues": get_queues()})
                 return
             if path == "/api/native-modes":
                 queue_id = self._query().get("queue_id", [""])[0]
