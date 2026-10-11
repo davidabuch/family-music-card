@@ -515,3 +515,12 @@ def test_remote_artwork_proxy_is_same_origin_and_bounded():
     assert '"/api/sonos-artwork"' in server
     assert "NoRedirect" in server
     assert "5 * 1024 * 1024" in server
+
+
+def test_music_assistant_image_objects_use_proxy_id():
+    """Now-playing image objects and search list artwork use the same proxy."""
+    app_js = (ROOT / "standalone/web/app.js").read_text()
+    assert 'typeof image.proxy_id === "string"' in app_js
+    assert '"/imageproxy/" + image.proxy_id' in app_js
+    assert "item?.image," in app_js
+    assert "const imageUrl = mediaImage(item);" in app_js
