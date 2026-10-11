@@ -129,6 +129,35 @@ function mediaImage(item) {
   return "";
 }
 
+// Sonos-native Apple Music stations can return an inaccessible /getaa URL.
+// On image failure, resolve the currently playing track via Music Assistant.
+async function recoverSonosArtwork(imageNode, item, originalUrl) {
+  if (!originalUrl.startsWith("/api/sonos-artwork?")) return;
+  const title = mediaName(item);
+  const artist = mediaArtist(item);
+  if (!title || !artist || !imageNode.isConnected) return;
+  const query = new URLSearchParams({q: title + " " + artist, provider: "apple"});
+  try {
+    const response = await fetch("/api/search?" + query, {cache: "no-store"});
+    if (!response.ok) return;
+    const data = await response.json();
+    const matches = Array.isArray(data.tracks) ? data.tracks : [];
+    const norm = (value) => String(value || "").toLowerCase().trim();
+    const track = matches.find((entry) =>
+      norm(entry.name) === norm(title) &&
+      (entry.artists || []).some((a) => norm(a.name) === norm(artist))
+    );
+    const fallback = track ? mediaImage(track) : "";
+    if (fallback && fallback !== originalUrl && imageNode.isConnected &&
+        imageNode.dataset.artworkSource === originalUrl) {
+      imageNode.onerror = null;
+      imageNode.src = fallback;
+    }
+  } catch {
+    // A missing match should not interrupt playback or other UI functions.
+  }
+}
+
 function showToast(message, timeout = 1600) {
   const toast = $("#toast");
   toast.textContent = message;
@@ -227,6 +256,11 @@ function renderNow() {
   const artwork = $("#artwork");
   const image = mediaImage(item);
   artwork.innerHTML = image ? `<img src="${escapeHtml(image)}" alt="">` : "<span>♪</span>";
+  if (image.startsWith("/api/sonos-artwork?")) {
+    const img = artwork.querySelector("img");
+    img.dataset.artworkSource = image;
+    img.onerror = () => { void recoverSonosArtwork(img, item, image); };
+  }
 
   const playing = player?.state === "playing" || (queueActive && queue?.state === "playing");
   $("#playPause").textContent = playing ? "❚❚" : "▶";

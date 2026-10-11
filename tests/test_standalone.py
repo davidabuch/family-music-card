@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.21"' in app_config
+    assert 'version: "0.2.22"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -524,3 +524,12 @@ def test_music_assistant_image_objects_use_proxy_id():
     assert '"/imageproxy/" + image.proxy_id' in app_js
     assert "item?.image," in app_js
     assert "const imageUrl = mediaImage(item);" in app_js
+
+
+def test_sonos_station_artwork_fallback():
+    js = (ROOT / "standalone/web/app.js").read_text()
+    assert "recoverSonosArtwork" in js
+    assert 'image.startsWith("/api/sonos-artwork?")' in js
+    assert 'provider: "apple"' in js
+    assert "norm(entry.name) === norm(title)" in js
+    assert "imageNode.isConnected" in js
