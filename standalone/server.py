@@ -517,6 +517,56 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_artwork(self) -> None:
+        """Retrieve image bytes only from the configured Music Assistant server.
+
+        Never accept an arbitrary upstream URL: the caller supplies a relative
+        image path, and the origin is always the trusted MA_URL.
+        """
+        from urllib.parse import urlsplit
+
+        path = self._query().get("path", [""])[0]
+        parsed = urlsplit(path)
+        if (
+            not path.startswith("/")
+            or path.startswith("//")
+            or parsed.scheme
+            or parsed.netloc
+            or not parsed.path.startswith(("/imageproxy", "/api/imageproxy", "/api/image"))
+        ):
+            self._send_json({"error": "invalid artwork path"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        request = urllib.request.Request(
+            MA_URL + path,
+            headers={"Authorization": f"Bearer {MA_TOKEN}"},
+        )
+        try:
+            with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
+                content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
+                if content_type not in ("image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"):
+                    self._send_json({"error": "upstream did not return an image"}, HTTPStatus.BAD_GATEWAY)
+                    return
+                content = response.read(5 * 1024 * 1024 + 1)
+                if len(content) > 5 * 1024 * 1024:
+                    self._send_json({"error": "artwork exceeds size limit"}, HTTPStatus.BAD_GATEWAY)
+                    return
+        except (urllib.error.URLError, TimeoutError, ValueError) as err:
+            self._send_json({"error": "artwork unavailable"}, HTTPStatus.BAD_GATEWAY)
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "private, max-age=300")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -541,6 +591,9 @@ class Handler(BaseHTTPRequestHandler):
                         "player_count": len(players),
                     }
                 )
+                return
+            if path == "/api/artwork":
+                self._serve_artwork()
                 return
             if path == "/api/state":
                 self._send_json({"players": get_players(), "queues": get_queues()})
