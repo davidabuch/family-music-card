@@ -532,7 +532,14 @@ class Handler(BaseHTTPRequestHandler):
             or path.startswith("//")
             or parsed.scheme
             or parsed.netloc
-            or not any(\n                parsed.path == prefix or parsed.path.startswith(prefix + "/")\n                for prefix in ("/imageproxy", "/api/imageproxy", "/api/image")\n            )
+            or not (
+                parsed.path == "/getaa"
+                if urllib.parse.urlsplit(self.path).path == "/api/sonos-artwork"
+                else any(
+                    parsed.path == prefix or parsed.path.startswith(prefix + "/")
+                    for prefix in ("/imageproxy", "/api/imageproxy", "/api/image")
+                )
+            )
         ):
             self._send_json({"error": "invalid artwork path"}, HTTPStatus.BAD_REQUEST)
             return
@@ -541,10 +548,21 @@ class Handler(BaseHTTPRequestHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
 
-        request = urllib.request.Request(
-            MA_URL + path,
-            headers={"Authorization": f"Bearer {MA_TOKEN}"},
-        )
+        origin = MA_URL
+        headers = {"Authorization": f"Bearer {MA_TOKEN}"}
+        if urllib.parse.urlsplit(self.path).path == "/api/sonos-artwork":
+            host = self._query().get("host", [""])[0]
+            permitted = {
+                (player.get("device_info") or {}).get("ip_address")
+                for player in get_players()
+                if (player.get("device_info") or {}).get("manufacturer") == "SONOS"
+            }
+            if host not in permitted or not host or parsed.path != "/getaa":
+                self._send_json({"error": "unrecognized Sonos artwork source"}, HTTPStatus.BAD_REQUEST)
+                return
+            origin = f"http://{host}:1400"
+            headers = {}
+        request = urllib.request.Request(origin + path, headers=headers)
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
                 content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
@@ -592,7 +610,7 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 )
                 return
-            if path == "/api/artwork":
+            if path in ("/api/artwork", "/api/sonos-artwork"):
                 self._serve_artwork()
                 return
             if path == "/api/state":
