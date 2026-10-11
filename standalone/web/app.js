@@ -86,6 +86,10 @@ function artworkUrl(value) {
       /^127\./.test(host) || /^10\./.test(host) ||
       /^192\.168\./.test(host) ||
       /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host);
+    if (isPrivateHost && url.port === "1400" && url.pathname === "/getaa") {
+      return "/api/sonos-artwork?host=" + encodeURIComponent(url.hostname) +
+        "&path=" + encodeURIComponent(url.pathname + url.search);
+    }
     if (isPrivateHost && /^\/(imageproxy|api\/imageproxy|api\/image)(\/|\?|$)/.test(url.pathname)) {
       return "/api/artwork?path=" + encodeURIComponent(url.pathname + url.search);
     }
