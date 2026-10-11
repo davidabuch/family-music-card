@@ -531,7 +531,7 @@ def resolve_sonos_artwork(players: list[dict[str, Any]]) -> None:
                     if str(track.get("name", "")).casefold().strip() != key[0]:
                         continue
                     artists = track.get("artists") or []
-                    if not any(str(a.get("name", "")).casefold().strip() == key[1] for a in artists):
+                    if not any(\n                        str(a.get("name", "")).casefold().strip() == key[1]\n                        for a in artists\n                    ):
                         continue
                     image = track.get("image")
                     if isinstance(image, str) and image.startswith("https://"):
