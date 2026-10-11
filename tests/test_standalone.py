@@ -538,10 +538,24 @@ def test_sonos_station_artwork_fallback():
 def test_native_sonos_artwork_resolved_server_side():
     import importlib.util
     import unittest.mock as mock
-    spec = importlib.util.spec_from_file_location("family_music_server_art", ROOT / "standalone/server.py")
+
+    spec = importlib.util.spec_from_file_location(
+        "family_music_server_art", ROOT / "standalone/server.py"
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    players = [{"current_media": {"title": "Heaven", "artist": "John Legend", "image_url": "http://192.168.1.17:1400/getaa?s=1"}}]
-    with mock.patch.object(module, "search", return_value={"tracks": [{"name": "Heaven", "artists": [{"name": "John Legend"}], "image": "https://example.com/art.jpg"}]}):
+    players = [{
+        "current_media": {
+            "title": "Heaven",
+            "artist": "John Legend",
+            "image_url": "http://192.168.1.17:1400/getaa?s=1",
+        }
+    }]
+    tracks = [{
+        "name": "Heaven",
+        "artists": [{"name": "John Legend"}],
+        "image": "https://example.com/art.jpg",
+    }]
+    with mock.patch.object(module, "search", return_value={"tracks": tracks}):
         module.resolve_sonos_artwork(players)
     assert players[0]["current_media"]["image_url"] == "https://example.com/art.jpg"
