@@ -517,6 +517,80 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_artwork(self) -> None:
+        """Retrieve image bytes only from the configured Music Assistant server.
+
+        Never accept an arbitrary upstream URL: the caller supplies a relative
+        image path, and the origin is always the trusted MA_URL.
+        """
+        from urllib.parse import urlsplit
+
+        path = self._query().get("path", [""])[0]
+        parsed = urlsplit(path)
+        if (
+            not path.startswith("/")
+            or path.startswith("//")
+            or parsed.scheme
+            or parsed.netloc
+            or not (
+                parsed.path == "/getaa"
+                if urllib.parse.urlsplit(self.path).path == "/api/sonos-artwork"
+                else any(
+                    parsed.path == prefix or parsed.path.startswith(prefix + "/")
+                    for prefix in ("/imageproxy", "/api/imageproxy", "/api/image")
+                )
+            )
+        ):
+            self._send_json({"error": "invalid artwork path"}, HTTPStatus.BAD_REQUEST)
+            return
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        origin = MA_URL
+        headers = {"Authorization": f"Bearer {MA_TOKEN}"}
+        if urllib.parse.urlsplit(self.path).path == "/api/sonos-artwork":
+            host = self._query().get("host", [""])[0]
+            permitted = {
+                (player.get("device_info") or {}).get("ip_address")
+                for player in get_players()
+                if (player.get("device_info") or {}).get("manufacturer") == "SONOS"
+            }
+            if host not in permitted or not host or parsed.path != "/getaa":
+                self._send_json(
+                    {"error": "unrecognized Sonos artwork source"}, HTTPStatus.BAD_REQUEST
+                )
+                return
+            origin = f"http://{host}:1400"
+            headers = {}
+        request = urllib.request.Request(origin + path, headers=headers)
+        try:
+            with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
+                content_type = response.headers.get("Content-Type", "").split(";")[0].lower()
+                if content_type not in (
+                    "image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"
+                ):
+                    self._send_json(
+                        {"error": "upstream did not return an image"}, HTTPStatus.BAD_GATEWAY
+                    )
+                    return
+                content = response.read(5 * 1024 * 1024 + 1)
+                if len(content) > 5 * 1024 * 1024:
+                    self._send_json({"error": "artwork exceeds size limit"}, HTTPStatus.BAD_GATEWAY)
+                    return
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            self._send_json({"error": "artwork unavailable"}, HTTPStatus.BAD_GATEWAY)
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "private, max-age=300")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Length", str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length) if length else b"{}"
@@ -541,6 +615,9 @@ class Handler(BaseHTTPRequestHandler):
                         "player_count": len(players),
                     }
                 )
+                return
+            if path in ("/api/artwork", "/api/sonos-artwork"):
+                self._serve_artwork()
                 return
             if path == "/api/state":
                 self._send_json({"players": get_players(), "queues": get_queues()})
