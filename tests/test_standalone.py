@@ -487,3 +487,29 @@ def test_native_mode_mapping_preserves_repeat_and_shuffle(monkeypatch):
     assert speaker.play_mode == "SHUFFLE"
     standalone.set_sonos_playback_mode("p1", "repeat", "off")
     assert speaker.play_mode == "SHUFFLE_NOREPEAT"
+
+
+def test_remote_artwork_proxy_rejects_untrusted_paths(monkeypatch):
+    """Image proxy never accepts a caller-selected upstream origin."""
+    import io
+
+    handler = object.__new__(standalone.Handler)
+    handler.wfile = io.BytesIO()
+    responses = []
+    handler._send_json = lambda payload, status=200: responses.append((payload, status))
+
+    for path in ("https://evil.example/imageproxy", "//evil.example/imageproxy",
+                 "/api/state", "/imageproxy.evil", "/../admin"):
+        handler._query = lambda path=path: {"path": [path]}
+        handler._serve_artwork()
+        assert responses[-1][1] == 400
+
+
+def test_remote_artwork_proxy_is_same_origin_and_bounded():
+    app_js = (ROOT / "standalone/web/app.js").read_text()
+    server = (ROOT / "standalone/server.py").read_text()
+    assert '"/api/artwork?path="' in app_js
+    assert '"/api/artwork"' in server
+    assert "MA_URL + path" in server
+    assert "NoRedirect" in server
+    assert "5 * 1024 * 1024" in server
