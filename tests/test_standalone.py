@@ -510,6 +510,7 @@ def test_remote_artwork_proxy_is_same_origin_and_bounded():
     server = (ROOT / "standalone/server.py").read_text()
     assert '"/api/artwork?path="' in app_js
     assert '"/api/artwork"' in server
-    assert "MA_URL + path" in server
+    assert "origin + path" in server
+    assert '"/api/sonos-artwork"' in server
     assert "NoRedirect" in server
     assert "5 * 1024 * 1024" in server
