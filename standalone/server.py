@@ -810,7 +810,9 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_static(self, path: str) -> None:
         relative = "index.html" if path in ("", "/") else path.lstrip("/")
         if path == "/favicon.ico":
-            relative = "icons/approved-v1/favicon.ico"
+            relative = "icons/approved-v2/favicon.ico"
+        if path in ("/apple-touch-icon.png", "/apple-touch-icon-precomposed.png"):
+            relative = "icons/approved-v2/icon-180.png"
         requested = (WEB_ROOT / relative).resolve()
         if WEB_ROOT.resolve() not in requested.parents and requested != WEB_ROOT.resolve():
             self.send_error(HTTPStatus.FORBIDDEN)
@@ -825,7 +827,9 @@ class Handler(BaseHTTPRequestHandler):
             "Cache-Control",
             (
                 "no-cache"
-                if requested.name in {"index.html", "service-worker.js"}
+                if requested.name in {"index.html", "service-worker.js", "manifest.webmanifest"}
+                or path in {"/favicon.ico", "/apple-touch-icon.png",
+                            "/apple-touch-icon-precomposed.png"}
                 else "public,max-age=3600"
             ),
         )

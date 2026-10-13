@@ -1,0 +1,10 @@
+{
+  "version": "approved-v2",
+  "crop_box": [
+    140,
+    140,
+    1114,
+    1114
+  ],
+  "operation": "Square crop, then Pillow 11.3.0 LANCZOS resize. No painting, padding, masks or distortion."
+}
