@@ -38,7 +38,22 @@ def main():
     for name, content in generated():
         target = DEST / name
         if checking:
-            assert target.read_bytes() == content, f"Derivative differs: {target}"
+            # PNG compression can differ across platforms; decoded pixels cannot.
+            with Image.open(target) as actual, Image.open(io.BytesIO(content)) as expected:
+                assert actual.format == expected.format, f"Format differs: {target}"
+                if actual.format == "ICO":
+                    sizes = {(16, 16), (32, 32), (48, 48)}
+                    assert actual.info["sizes"] == sizes, f"ICO sizes differ: {target}"
+                    for size in sizes:
+                        assert (
+                            actual.ico.getimage(size).convert("RGBA").tobytes()
+                            == expected.ico.getimage(size).convert("RGBA").tobytes()
+                        ), target
+                else:
+                    assert actual.size == expected.size, f"Dimensions differ: {target}"
+                    assert actual.convert("RGBA").tobytes() == expected.convert("RGBA").tobytes(), (
+                        f"Pixels differ: {target}"
+                    )
         else:
             target.write_bytes(content)
     print(
