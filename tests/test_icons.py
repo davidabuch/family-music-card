@@ -36,23 +36,44 @@ class IconTests(unittest.TestCase):
         self.assertEqual({i["sizes"] for i in manifest["icons"]}, {"192x192", "512x512"})
         index = (ROOT / "web/index.html").read_text()
         self.assertIn('rel="apple-touch-icon" sizes="180x180"', index)
-        self.assertIn('href="/icons/approved-v1/icon-180.png"', index)
+        self.assertIn('href="/apple-touch-icon.png?v=approved-v2"', index)
         self.assertNotIn("icon.svg", index)
+        self.assertNotIn("approved-v1", index)
+        self.assertIn('rel="apple-touch-icon-precomposed"', index)
+        self.assertIn("/apple-touch-icon-precomposed.png?v=approved-v2", index)
         assets = {i["src"] for i in manifest["icons"]}
-        assets.update(f"/icons/approved-v1/icon-{size}.png" for size in (16, 32, 180))
-        assets.add("/favicon.ico")
+        assets.update(f"/icons/approved-v2/icon-{size}.png" for size in (16, 32, 180))
+        assets.update(
+            ("/favicon.ico", "/apple-touch-icon.png", "/apple-touch-icon-precomposed.png")
+        )
         for path in assets:
             with self.subTest(path=path):
-                self.assertTrue(path.startswith("/icons/approved-v1/") or path == "/favicon.ico")
-                local, headers = self.request(path + "?probe=local", "app-local.example.test")
-                remote, _ = self.request(path + "?probe=remote", "app.example.test")
+                self.assertTrue(
+                    path.startswith("/icons/approved-v2/")
+                    or path
+                    in (
+                        "/favicon.ico",
+                        "/apple-touch-icon.png",
+                        "/apple-touch-icon-precomposed.png",
+                    )
+                )
+                local, headers = self.request(path + "?probe=local", "192.168.1.125:8099")
+                remote, _ = self.request(path + "?probe=remote", "music.davidbuchmd.com")
                 self.assertEqual(local, remote)
+                if path.startswith("/apple-touch-icon"):
+                    bare, _ = self.request(path, "192.168.1.125:8099")
+                    self.assertEqual(bare, local)
+                    self.assertEqual(headers["Cache-Control"], "no-cache")
+                    versioned, _ = self.request(path + "?v=approved-v2", "music.davidbuchmd.com")
+                    self.assertEqual(versioned, local)
                 expected = (
                     ROOT
                     / "web"
                     / (
-                        "icons/approved-v1/favicon.ico"
+                        "icons/approved-v2/favicon.ico"
                         if path == "/favicon.ico"
+                        else "icons/approved-v2/icon-180.png"
+                        if path.startswith("/apple-touch-icon")
                         else path.lstrip("/")
                     )
                 )
@@ -70,6 +91,9 @@ class IconTests(unittest.TestCase):
         worker = (ROOT / "web" / "service-worker.js").read_text()
         self.assertNotIn("icon.svg", worker)
         for size in (16, 32, 180, 192, 512):
-            self.assertIn(f'"/icons/approved-v1/icon-{size}.png"', worker)
-        self.assertIn("approved-icons-v1", worker)
+            self.assertIn(f'"/icons/approved-v2/icon-{size}.png"', worker)
+        self.assertIn("approved-icons-v2", worker)
         self.assertIn("/api/", worker)
+        self.assertIn("/apple-touch-icon.png?v=approved-v2", worker)
+        self.assertIn("/apple-touch-icon-precomposed.png?v=approved-v2", worker)
+        self.assertNotIn("approved-v1", worker)
