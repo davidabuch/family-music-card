@@ -25,7 +25,10 @@ jobs:
           python-version: "3.13"
 
       - name: Install validation tools
-        run: pip install pytest ruff
+        run: pip install pytest ruff Pillow==11.3.0
+
+      - name: Verify approved icon derivatives
+        run: python standalone/scripts/generate_icons.py --check
 
       - name: Pytest
         run: pytest -q

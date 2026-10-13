@@ -809,6 +809,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path: str) -> None:
         relative = "index.html" if path in ("", "/") else path.lstrip("/")
+        if path == "/favicon.ico":
+            relative = "icons/approved-v1/favicon.ico"
         requested = (WEB_ROOT / relative).resolve()
         if WEB_ROOT.resolve() not in requested.parents and requested != WEB_ROOT.resolve():
             self.send_error(HTTPStatus.FORBIDDEN)

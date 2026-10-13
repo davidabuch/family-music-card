@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.24
+
+- Use the verified approved artwork for Apple touch icons, browser favicons and 192/512px PWA icons.
+- Serve identical icon bytes on local and remote origins; preserve authentication and controls.
+
+
 ## 0.2.19
 
 - Show standard Repeat and Shuffle icons in their correct left/right positions.
