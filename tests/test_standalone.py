@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.29"' in app_config
+    assert 'version: "0.2.30"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -709,11 +709,16 @@ def test_dynamic_group_can_remove_coordinator_and_follow_successor(monkeypatch):
     )
     monkeypatch.setattr(
         standalone, "_wait_for_sonos_successor",
-        lambda successor, old_leader, attempts=12: players,
+        lambda successor, attempts=12: players,
     )
     monkeypatch.setattr(
-        standalone, "_transfer_ma_queue_without_resume",
-        lambda source, target: calls.append(("transfer", source, target)),
+        standalone, "_wait_for_sonos_departure",
+        lambda successor, departing, attempts=12: players,
+    )
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: calls.append((command, kwargs)) or None,
     )
 
     result = standalone.change_sonos_group(
@@ -722,7 +727,7 @@ def test_dynamic_group_can_remove_coordinator_and_follow_successor(monkeypatch):
 
     assert calls == [
         ("delegate", "RINCON_KITCHEN"),
-        ("transfer", "RINCON_MASTER", "RINCON_KITCHEN"),
+        ("players/cmd/ungroup", {"player_id": "RINCON_MASTER"}),
     ]
     assert result["selected_player_id"] == "RINCON_KITCHEN"
     assert result["leader_id"] == "RINCON_KITCHEN"
@@ -797,8 +802,23 @@ def test_gapless_coordinator_handoff_uses_sonos_delegate_and_nonresuming_queue_m
     server = (ROOT / "standalone" / "server.py").read_text()
 
     assert "DelegateGroupCoordinationTo" in server
-    assert "<RejoinGroup>0</RejoinGroup>" in server
-    assert '"player_queues/transfer"' in server
-    assert "auto_play=False" in server
+    assert "<RejoinGroup>1</RejoinGroup>" in server
+    assert "_wait_for_sonos_departure" in server
+    assert '"player_queues/transfer"' not in server.split(
+        "def change_sonos_group", 1
+    )[0].split("def _delegate_sonos_coordinator", 1)[1]
     assert '"handoff": "native_sonos_delegate"' in server
     assert '"handoff": "music_assistant_fallback"' in server
+
+
+def test_gapless_handoff_preserves_original_sonos_cloud_queue_owner():
+    server = (ROOT / "standalone" / "server.py").read_text()
+    handoff = server.split('handoff": "native_sonos_delegate"', 1)[0].rsplit(
+        "ordered_remaining", 1
+    )[1]
+
+    assert "<RejoinGroup>1</RejoinGroup>" in server
+    assert 'client.command("players/cmd/ungroup", player_id=leader_id)' in handoff
+    assert "_wait_for_sonos_departure(successor_id, leader_id)" in handoff
+    assert "_transfer_ma_queue_without_resume" not in server
+    assert '"session_queue_id": leader_id' in server
