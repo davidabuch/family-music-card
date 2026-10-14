@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.28"' in app_config
+    assert 'version: "0.2.33"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -760,3 +760,14 @@ def test_dynamic_group_popup_waits_for_authoritative_membership_without_reopen()
     assert "for (let attempt = 0; attempt < 10; attempt += 1)" in js
     assert "authoritativeGroupMembership(memberId) === expected" in js
     assert "if (state.groupOpen) renderGroupOverlay()" in js
+
+
+def test_now_playing_uses_descriptive_speaker_icons():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+
+    assert 'class="speaker-group-icon"' in index
+    assert 'class="single-speaker-icon"' in index
+    assert 'aria-label="Choose playback destination"' in index
+    assert 'aria-label="Group speakers"' in index
+    assert '<span class="speaker-icon">▣</span>' not in index
+    assert 'aria-label="Speaker balance">▣</button>' not in index
