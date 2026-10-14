@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.14";
+const CARD_VERSION = "0.3.15";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -207,6 +207,7 @@ class FamilyMusicCard extends HTMLElement {
       if (this._selectedPlayer === player) {
         this._groupTopology = topology?.available ? topology : null;
         this._groupTopologyFor = player;
+        if (this._groupTopology) this._initializeSpeakerBalance();
         if (this._pendingGroupChange && this._groupTopology) {
           const member = this._groupTopology.speakers?.find(
             (item) => item.player_id === this._pendingGroupChange.memberPlayerId
@@ -239,9 +240,33 @@ class FamilyMusicCard extends HTMLElement {
     if (!Array.isArray(speakers) || !speakers.length) {
       return '<div class="menu-status">Dynamic grouping is unavailable for this destination.</div>';
     }
+    const members = speakers.filter((speaker) => speaker.member);
+    const balance = members.length > 1
+      ? `
+        <div class="dynamic-group-balance">
+          <div class="popover-title">Speaker Balance</div>
+          <div class="balance-help">Shape where the sound comes from without switching speakers.</div>
+          <div class="member-balance-list">
+            ${members.map((member) => {
+              const trim = this._memberTrimValues.get(member.entity_id) ?? 0;
+              return `
+                <div class="member-balance-row" data-member="${this._escape(member.entity_id)}">
+                  <div class="member-balance-name">${this._escape(member.name)}</div>
+                  <input class="member-trim" data-entity="${this._escape(member.entity_id)}"
+                    type="range" min="-12" max="12" step="1" value="${trim}"
+                    aria-label="${this._escape(member.name)} balance, less to more">
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div>
+          <button id="resetSpeakerBalance" class="balance-reset" type="button">Reset Balance</button>
+        </div>
+      `
+      : "";
     return `
       <div class="popover-title">Group Speakers</div>
-      <div class="balance-help">Add a speaker to this Sonos session. Playback stays synchronized.</div>
+      <div class="balance-help">Add or remove speakers from this synchronized Sonos session.</div>
       <div class="dynamic-group-list">
         ${speakers.map((speaker) => {
           const pending = this._pendingGroupChange?.memberPlayerId === speaker.player_id
@@ -249,25 +274,30 @@ class FamilyMusicCard extends HTMLElement {
           const member = pending
             ? this._pendingGroupChange.action === "join"
             : Boolean(speaker.member);
+          const onlyMember = speaker.coordinator && members.length <= 1;
           const status = speaker.coordinator
             ? "Playing"
             : pending
               ? (this._pendingGroupChange.action === "join" ? "Joining…" : "Leaving…")
               : (member ? "Joined" : "Add");
+          const detail = speaker.coordinator
+            ? (onlyMember ? "Current playback" : "Current playback · tap to remove")
+            : "Tap to " + (member ? "remove" : "add");
           return `
             <button class="dynamic-group-option ${member ? "joined" : ""} ${pending ? "pending" : ""}"
               data-group-player="${this._escape(speaker.player_id)}"
-              ${speaker.coordinator || !speaker.available ? "disabled" : ""}
+              ${onlyMember || !speaker.available ? "disabled" : ""}
               aria-pressed="${member}" aria-busy="${pending}">
               <span class="dynamic-group-mark">${pending ? "◌" : member ? "✓" : "○"}</span>
               <span class="dynamic-group-copy"><strong>${this._escape(speaker.name)}</strong>
-                <small>${speaker.coordinator ? "Current playback" : "Tap to " + (member ? "remove" : "add")}</small>
+                <small>${detail}</small>
               </span>
               <span class="dynamic-group-status">${status}</span>
             </button>
           `;
         }).join("")}
       </div>
+      ${balance}
     `;
   }
 
@@ -276,8 +306,10 @@ class FamilyMusicCard extends HTMLElement {
     const speaker = this._groupTopology?.speakers?.find(
       (item) => item.player_id === memberPlayerId
     );
-    if (!speaker || speaker.coordinator || !speaker.available) return;
+    if (!speaker || !speaker.available) return;
+    const members = this._groupTopology?.speakers?.filter((item) => item.member) || [];
     const action = speaker.member ? "leave" : "join";
+    if (action === "leave" && members.length <= 1) return;
     this._pendingGroupChange = {
       memberPlayerId,
       action,
@@ -285,11 +317,15 @@ class FamilyMusicCard extends HTMLElement {
     };
     this._renderNowOverlays();
     try {
-      await this._ws("family_music/group_member", {
+      const result = await this._ws("family_music/group_member", {
         player_entity_id: this._selectedPlayer,
         member_player_id: memberPlayerId,
         action,
       });
+      if (result?.selected_player_entity_id) {
+        this._selectedPlayer = result.selected_player_entity_id;
+        localStorage.setItem("family-music-card-player", this._selectedPlayer);
+      }
       this._groupTopologyFor = null;
       await this._loadGroupTopology(true);
     } catch (_error) {
@@ -467,8 +503,14 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
+  _balanceMembers() {
+    if (this._isSelectedGroup()) return this._groupMembers;
+    return (this._groupTopology?.speakers || []).filter((speaker) => speaker.member);
+  }
+
   _initializeSpeakerBalance() {
-    const samples = this._groupMembers
+    const members = this._balanceMembers();
+    const samples = members
       .map((member) => {
         const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
         return volume == null ? null : Math.round(volume * 100);
@@ -481,10 +523,13 @@ class FamilyMusicCard extends HTMLElement {
     }
     this._mixBaselinePercent = samples.reduce((sum, value) => sum + value, 0) / samples.length;
     this._memberTrimValues.clear();
-    this._groupMembers.forEach((member) => {
+    members.forEach((member) => {
       const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
       const percent = volume == null ? this._mixBaselinePercent : Math.round(volume * 100);
-      const trim = Math.max(-12, Math.min(12, Math.round((percent - this._mixBaselinePercent) / 2)));
+      const trim = Math.max(
+        -12,
+        Math.min(12, Math.round((percent - this._mixBaselinePercent) / 2))
+      );
       this._memberTrimValues.set(member.entity_id, trim);
     });
   }
@@ -495,10 +540,11 @@ class FamilyMusicCard extends HTMLElement {
   }
 
   _resetSpeakerBalance() {
+    const members = this._balanceMembers();
     this._memberTrimValues.clear();
-    this._groupMembers.forEach((member) => this._memberTrimValues.set(member.entity_id, 0));
+    members.forEach((member) => this._memberTrimValues.set(member.entity_id, 0));
     const baseline = Math.max(0, Math.min(100, Math.round(this._mixBaselinePercent || 0)));
-    this._groupMembers.forEach((member) => {
+    members.forEach((member) => {
       this._queueVolumeWrite(
         member.entity_id,
         baseline,
@@ -528,7 +574,9 @@ class FamilyMusicCard extends HTMLElement {
         if (!entityId) return;
         const trim = Math.max(-12, Math.min(12, Number(event.target.value || 0)));
         this._memberTrimValues.set(entityId, trim);
-        const member = this._groupMembers.find((item) => item.entity_id === entityId);
+        const member = this._balanceMembers().find(
+          (item) => item.entity_id === entityId
+        );
         const targetPercent = this._trimTargetPercent(trim);
         this._queueVolumeWrite(
           entityId,
@@ -1724,7 +1772,7 @@ class FamilyMusicCard extends HTMLElement {
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden;padding:0;background:transparent}.music-search-icon{width:100%;height:100%;display:block;border-radius:50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.group-speakers-button ha-icon{--mdc-icon-size:31px}.group-speakers-button:disabled,.group-speakers-button.disabled{opacity:.28;cursor:default;filter:grayscale(1)}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 28px;gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}.destination-activity{width:28px;height:22px}.playing-equalizer{width:28px;height:22px;display:flex;align-items:flex-end;justify-content:center;gap:3px}.playing-equalizer i{display:block;width:3px;height:7px;border-radius:999px;background:currentColor;transform-origin:center bottom;animation:familyMusicEq 760ms ease-in-out infinite alternate}.playing-equalizer i:nth-child(2){height:15px;animation-duration:560ms;animation-delay:-210ms}.playing-equalizer i:nth-child(3){height:10px;animation-duration:690ms;animation-delay:-390ms}@keyframes familyMusicEq{0%{transform:scaleY(.35);opacity:.55}100%{transform:scaleY(1);opacity:1}}@media(prefers-reduced-motion:reduce){.playing-equalizer i{animation:none}}
-      .balance-help{font-size:14px;line-height:1.35;color:rgba(255,255,255,.62);margin:-4px 0 14px}.dynamic-group-list{display:flex;flex-direction:column;gap:6px}.dynamic-group-option{width:100%;min-height:58px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 72px;gap:10px;align-items:center;padding:9px 10px;text-align:left}.dynamic-group-option.joined{background:rgba(255,255,255,.06)}.dynamic-group-option.pending{background:rgba(255,255,255,.11)}.dynamic-group-option:disabled{opacity:1}.dynamic-group-mark{font-size:20px;text-align:center}.dynamic-group-option.pending .dynamic-group-mark{animation:familyMusicSpin .8s linear infinite}@keyframes familyMusicSpin{to{transform:rotate(360deg)}}.dynamic-group-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.dynamic-group-copy strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dynamic-group-copy small{font-size:11px;color:rgba(255,255,255,.48)}.dynamic-group-status{font-size:11px;color:rgba(255,255,255,.62);font-weight:800;text-align:right}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr);gap:14px;align-items:center;min-height:58px}.member-balance-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-trim{width:100%;height:46px;margin:0;touch-action:pan-y;cursor:pointer}.balance-scale{display:grid;grid-template-columns:1fr 1fr 1fr;margin:1px 0 12px;padding-left:calc(110px + 14px);font-size:11px;color:rgba(255,255,255,.46)}.balance-scale span:nth-child(2){text-align:center}.balance-scale span:last-child{text-align:right}.balance-reset{display:block;width:100%;height:44px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;cursor:pointer}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
+      .balance-help{font-size:14px;line-height:1.35;color:rgba(255,255,255,.62);margin:-4px 0 14px}.dynamic-group-list{display:flex;flex-direction:column;gap:6px}.dynamic-group-balance{margin-top:18px;padding-top:14px;border-top:1px solid rgba(255,255,255,.08)}.dynamic-group-option{width:100%;min-height:58px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 72px;gap:10px;align-items:center;padding:9px 10px;text-align:left}.dynamic-group-option.joined{background:rgba(255,255,255,.06)}.dynamic-group-option.pending{background:rgba(255,255,255,.11)}.dynamic-group-option:disabled{opacity:1}.dynamic-group-mark{font-size:20px;text-align:center}.dynamic-group-option.pending .dynamic-group-mark{animation:familyMusicSpin .8s linear infinite}@keyframes familyMusicSpin{to{transform:rotate(360deg)}}.dynamic-group-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.dynamic-group-copy strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dynamic-group-copy small{font-size:11px;color:rgba(255,255,255,.48)}.dynamic-group-status{font-size:11px;color:rgba(255,255,255,.62);font-weight:800;text-align:right}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr);gap:14px;align-items:center;min-height:58px}.member-balance-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-trim{width:100%;height:46px;margin:0;touch-action:pan-y;cursor:pointer}.balance-scale{display:grid;grid-template-columns:1fr 1fr 1fr;margin:1px 0 12px;padding-left:calc(110px + 14px);font-size:11px;color:rgba(255,255,255,.46)}.balance-scale span:nth-child(2){text-align:center}.balance-scale span:last-child{text-align:right}.balance-reset{display:block;width:100%;height:44px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;cursor:pointer}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
       .nav-strip{height:78px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto;padding:4px 8px 6px;gap:4px}
       .nav-button{min-width:0;width:100%;height:64px;border:0;border-radius:14px;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:0}
       .nav-button ha-icon{--mdc-icon-size:26px}.nav-button span{font-size:11px;font-weight:700;white-space:nowrap}.nav-button.active{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}

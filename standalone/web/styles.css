@@ -44,3 +44,6 @@
 .group-speaker-copy small{color:#888;font-size:11px}
 .group-speaker-status{font-size:11px;color:#aaa;text-align:right;font-weight:800}
 .group-speaker-option.pending .group-speaker-mark{animation:spin .8s linear infinite}
+
+.group-balance-section{margin-top:16px;padding-top:14px;border-top:1px solid #ffffff14}
+.group-balance-section h4{font-size:14px;margin:0 0 8px}
