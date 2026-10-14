@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.17"
+    assert manifest["version"] == "0.3.18"
     assert card_path.exists()
 
 
@@ -539,10 +539,19 @@ def test_ha_gapless_coordinator_handoff_uses_native_sonos_delegate():
     init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
 
     assert "DelegateGroupCoordinationTo" in init_text
-    assert "<RejoinGroup>0</RejoinGroup>" in init_text
+    assert "<RejoinGroup>1</RejoinGroup>" in init_text
     assert "_wait_for_ma_sonos_successor" in init_text
-    assert "_transfer_ma_queue_without_resume" in init_text
-    assert '"player_queues/transfer"' in init_text
-    assert "auto_play=False" in init_text
+    assert "_wait_for_ma_sonos_departure" in init_text
+    assert "_transfer_ma_queue_without_resume" not in init_text
     assert 'handoff = "native_sonos_delegate"' in init_text
     assert 'handoff = "music_assistant_fallback"' in init_text
+
+
+def test_ha_gapless_handoff_preserves_original_cloud_queue_owner():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+
+    assert "<RejoinGroup>1</RejoinGroup>" in init_text
+    assert '"players/cmd/ungroup", player_id=context["leader_id"]' in init_text
+    assert "_wait_for_ma_sonos_departure" in init_text
+    assert 'response["session_queue_id"] = player_id' in init_text
+    assert '"player_queues/transfer"' not in init_text

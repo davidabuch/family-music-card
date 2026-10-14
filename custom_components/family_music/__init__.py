@@ -499,7 +499,7 @@ async def _delegate_sonos_coordinator(
     <u:DelegateGroupCoordinationTo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
       <InstanceID>0</InstanceID>
       <NewCoordinator>{successor_id}</NewCoordinator>
-      <RejoinGroup>0</RejoinGroup>
+      <RejoinGroup>1</RejoinGroup>
     </u:DelegateGroupCoordinationTo>
   </s:Body>
 </s:Envelope>"""
@@ -522,9 +522,9 @@ async def _delegate_sonos_coordinator(
 
 
 async def _wait_for_ma_sonos_successor(
-    mass, successor_id: str, old_leader_id: str, attempts: int = 12
+    mass, successor_id: str, attempts: int = 12
 ) -> list[dict[str, Any]]:
-    """Wait for MA to observe native Sonos coordinator handoff."""
+    """Wait for MA to observe the delegated Sonos coordinator."""
     latest: list[dict[str, Any]] = []
     for _ in range(attempts):
         raw = await mass.send_command("players/all")
@@ -537,34 +537,32 @@ async def _wait_for_ma_sonos_successor(
             context = _ma_sonos_group_context(latest, successor_id)
         except ValueError:
             context = None
-        if (
-            context
-            and context["leader_id"] == successor_id
-            and old_leader_id not in context["member_ids"]
-        ):
+        if context and context["leader_id"] == successor_id:
             return latest
         await asyncio.sleep(0.15)
     raise RuntimeError("Native Sonos coordinator handoff was not confirmed")
 
 
-async def _transfer_ma_queue_without_resume(
-    mass, source_id: str, target_id: str
-) -> None:
-    """Move MA queue bookkeeping after Sonos has already handed off live playback."""
-    raw = await mass.send_command("player_queues/all")
-    queues = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
-    source = next((q for q in queues if q.get("queue_id") == source_id), None)
-    if not source:
-        return
-    active = bool(source.get("active")) or source.get("state") not in (None, "idle")
-    if not active:
-        return
-    await mass.send_command(
-        "player_queues/transfer",
-        source_queue_id=source_id,
-        target_queue_id=target_id,
-        auto_play=False,
-    )
+async def _wait_for_ma_sonos_departure(
+    mass, successor_id: str, departing_id: str, attempts: int = 12
+) -> list[dict[str, Any]]:
+    """Wait for the former coordinator to leave the delegated Sonos group."""
+    latest: list[dict[str, Any]] = []
+    for _ in range(attempts):
+        raw = await mass.send_command("players/all")
+        latest = (
+            [player for player in raw if isinstance(player, dict)]
+            if isinstance(raw, list)
+            else []
+        )
+        try:
+            context = _ma_sonos_group_context(latest, successor_id)
+        except ValueError:
+            context = None
+        if context and departing_id not in context["member_ids"]:
+            return latest
+        await asyncio.sleep(0.15)
+    raise RuntimeError("Former Sonos coordinator did not leave the group")
 
 
 def _ma_player_id_for_entity(registry, entity_id: str) -> str | None:
@@ -751,10 +749,17 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
                             break
                 else:
                     await _wait_for_ma_sonos_successor(
-                        mass, selected_player_id, context["leader_id"]
+                        mass, selected_player_id
                     )
-                    await _transfer_ma_queue_without_resume(
-                        mass, context["leader_id"], selected_player_id
+                    # Delegate with RejoinGroup=true first, then remove the old
+                    # coordinator as a normal child. This keeps the Sonos
+                    # Cloud Queue session bound to its original MA endpoint and
+                    # avoids MA's stop/resume leader-transfer path.
+                    await mass.send_command(
+                        "players/cmd/ungroup", player_id=context["leader_id"]
+                    )
+                    await _wait_for_ma_sonos_departure(
+                        mass, selected_player_id, context["leader_id"]
                     )
                     handoff = "native_sonos_delegate"
     except ValueError as err:
@@ -766,6 +771,8 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
         response["handoff"] = handoff
     if selected_player_id:
         response["selected_player_id"] = selected_player_id
+        if handoff == "native_sonos_delegate":
+            response["session_queue_id"] = player_id
         response["selected_player_entity_id"] = next(
             (
                 entry.entity_id
