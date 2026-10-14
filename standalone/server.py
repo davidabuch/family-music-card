@@ -225,12 +225,34 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
         return {"accepted": True, "leader_id": leader_id, "result": result}
 
     if action == "leave":
-        if member_id == leader_id:
-            raise ValueError("The active Sonos coordinator cannot be removed here")
         if member_id not in member_ids:
             return {"accepted": True, "already_removed": True, "leader_id": leader_id}
+        remaining_ids = [item for item in member_ids if item != member_id]
+        if not remaining_ids:
+            raise ValueError("At least one Sonos speaker must remain in the session")
         result = client.command("players/cmd/ungroup", player_id=member_id)
-        return {"accepted": True, "leader_id": leader_id, "result": result}
+        if member_id != leader_id:
+            return {"accepted": True, "leader_id": leader_id, "result": result}
+
+        # Music Assistant transfers sync leadership when an active leader is
+        # ungrouped. Re-observe authoritative topology so the UI follows the
+        # surviving session instead of staying attached to the removed leader.
+        refreshed = get_players()
+        successor_id = remaining_ids[0]
+        for candidate_id in remaining_ids:
+            try:
+                candidate_context = _sonos_group_context(candidate_id, refreshed)
+            except ValueError:
+                continue
+            if candidate_context["leader_id"] in remaining_ids:
+                successor_id = candidate_context["leader_id"]
+                break
+        return {
+            "accepted": True,
+            "leader_id": successor_id,
+            "selected_player_id": successor_id,
+            "result": result,
+        }
 
     raise ValueError("Invalid group action")
 
