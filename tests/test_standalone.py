@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.26"' in app_config
+    assert 'version: "0.2.27"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -677,3 +677,77 @@ def test_dynamic_grouping_ui_is_optimistic_but_waits_for_authoritative_state():
     assert "Sonos group change was not confirmed" in js
     assert 'provider === "sonos"' in js
     assert ".group-speaker-option.pending" in css
+
+
+def test_dynamic_group_can_remove_coordinator_and_follow_successor(monkeypatch):
+    calls = []
+    observations = iter([
+        [
+            {
+                "player_id": "RINCON_MASTER",
+                "provider": "sonos",
+                "type": "player",
+                "available": True,
+                "group_members": ["RINCON_MASTER", "RINCON_KITCHEN"],
+                "group_childs": ["RINCON_MASTER", "RINCON_KITCHEN"],
+                "can_group_with": ["RINCON_KITCHEN"],
+            },
+            {
+                "player_id": "RINCON_KITCHEN",
+                "provider": "sonos",
+                "type": "player",
+                "available": True,
+                "synced_to": "RINCON_MASTER",
+                "group_members": [],
+                "group_childs": [],
+                "can_group_with": ["RINCON_MASTER"],
+            },
+        ],
+        [
+            {
+                "player_id": "RINCON_MASTER",
+                "provider": "sonos",
+                "type": "player",
+                "available": True,
+                "synced_to": "RINCON_KITCHEN",
+                "group_members": [],
+                "group_childs": [],
+            },
+            {
+                "player_id": "RINCON_KITCHEN",
+                "provider": "sonos",
+                "type": "player",
+                "available": True,
+                "group_members": ["RINCON_KITCHEN"],
+                "group_childs": ["RINCON_KITCHEN"],
+            },
+        ],
+    ])
+    monkeypatch.setattr(standalone, "get_players", lambda: next(observations))
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: calls.append((command, kwargs)) or None,
+    )
+
+    result = standalone.change_sonos_group(
+        "RINCON_MASTER", "RINCON_MASTER", "leave"
+    )
+
+    assert calls == [("players/cmd/ungroup", {"player_id": "RINCON_MASTER"})]
+    assert result["selected_player_id"] == "RINCON_KITCHEN"
+    assert result["leader_id"] == "RINCON_KITCHEN"
+
+
+def test_dynamic_group_ui_has_member_balance_and_coordinator_removal():
+    js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    css = (ROOT / "standalone" / "web" / "styles.css").read_text()
+
+    assert "groupBalanceMarkup" in js
+    assert "wireMemberTrimControls" in js
+    assert "Speaker Balance" in js
+    assert "without switching speakers" in js
+    assert "Current playback · tap to remove" in js
+    assert "selected_player_id" in js
+    assert "family-music-player-id" in js
+    assert ".group-balance-section" in css
