@@ -1,3 +1,8 @@
+## 0.2.28
+
+- Keep the Group Speakers popup live after join/remove commands by polling authoritative Music Assistant topology until the requested membership change is visible.
+- Re-render the open popup immediately after confirmation so a newly joined speaker can be removed without closing and reopening the panel.
+
 ## 0.2.27
 
 - Allow removing the original Sonos coordinator when other dynamic group members remain; Music Assistant transfers the active sync session to a survivor.
