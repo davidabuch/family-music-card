@@ -607,14 +607,50 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
                     target_player=context["leader_id"],
                     child_player_ids=[member_id],
                 )
-        elif member_id != context["leader_id"] and member_id in context["member_ids"]:
+        selected_player_id = None
+        if msg["action"] == "leave" and member_id in context["member_ids"]:
+            remaining_ids = [
+                item for item in context["member_ids"] if item != member_id
+            ]
+            if not remaining_ids:
+                raise ValueError("At least one Sonos speaker must remain in the session")
             await mass.send_command("players/cmd/ungroup", player_id=member_id)
-        elif member_id == context["leader_id"]:
-            raise ValueError("The active Sonos coordinator cannot be removed here")
+            if member_id == context["leader_id"]:
+                raw_after = await mass.send_command("players/all")
+                players_after = (
+                    [player for player in raw_after if isinstance(player, dict)]
+                    if isinstance(raw_after, list)
+                    else []
+                )
+                selected_player_id = remaining_ids[0]
+                for candidate_id in remaining_ids:
+                    try:
+                        candidate_context = _ma_sonos_group_context(
+                            players_after, candidate_id
+                        )
+                    except ValueError:
+                        continue
+                    if candidate_context["leader_id"] in remaining_ids:
+                        selected_player_id = candidate_context["leader_id"]
+                        break
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_group_change", str(err))
         return
-    connection.send_result(msg["id"], {"accepted": True})
+
+    response = {"accepted": True}
+    if selected_player_id:
+        response["selected_player_id"] = selected_player_id
+        response["selected_player_entity_id"] = next(
+            (
+                entry.entity_id
+                for entry in registry.entities.values()
+                if entry.domain == "media_player"
+                and entry.platform == "music_assistant"
+                and entry.unique_id == selected_player_id
+            ),
+            None,
+        )
+    connection.send_result(msg["id"], response)
 
 
 @websocket_api.websocket_command(
