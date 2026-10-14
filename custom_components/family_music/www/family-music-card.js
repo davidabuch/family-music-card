@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.14";
+const CARD_VERSION = "0.3.15";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -207,6 +207,7 @@ class FamilyMusicCard extends HTMLElement {
       if (this._selectedPlayer === player) {
         this._groupTopology = topology?.available ? topology : null;
         this._groupTopologyFor = player;
+        if (this._groupTopology) this._initializeSpeakerBalance();
         if (this._pendingGroupChange && this._groupTopology) {
           const member = this._groupTopology.speakers?.find(
             (item) => item.player_id === this._pendingGroupChange.memberPlayerId
@@ -239,9 +240,33 @@ class FamilyMusicCard extends HTMLElement {
     if (!Array.isArray(speakers) || !speakers.length) {
       return '<div class="menu-status">Dynamic grouping is unavailable for this destination.</div>';
     }
+    const members = speakers.filter((speaker) => speaker.member);
+    const balance = members.length > 1
+      ? `
+        <div class="dynamic-group-balance">
+          <div class="popover-title">Speaker Balance</div>
+          <div class="balance-help">Shape where the sound comes from without switching speakers.</div>
+          <div class="member-balance-list">
+            ${members.map((member) => {
+              const trim = this._memberTrimValues.get(member.entity_id) ?? 0;
+              return `
+                <div class="member-balance-row" data-member="${this._escape(member.entity_id)}">
+                  <div class="member-balance-name">${this._escape(member.name)}</div>
+                  <input class="member-trim" data-entity="${this._escape(member.entity_id)}"
+                    type="range" min="-12" max="12" step="1" value="${trim}"
+                    aria-label="${this._escape(member.name)} balance, less to more">
+                </div>
+              `;
+            }).join("")}
+          </div>
+          <div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div>
+          <button id="resetSpeakerBalance" class="balance-reset" type="button">Reset Balance</button>
+        </div>
+      `
+      : "";
     return `
       <div class="popover-title">Group Speakers</div>
-      <div class="balance-help">Add a speaker to this Sonos session. Playback stays synchronized.</div>
+      <div class="balance-help">Add or remove speakers from this synchronized Sonos session.</div>
       <div class="dynamic-group-list">
         ${speakers.map((speaker) => {
           const pending = this._pendingGroupChange?.memberPlayerId === speaker.player_id
@@ -249,25 +274,30 @@ class FamilyMusicCard extends HTMLElement {
           const member = pending
             ? this._pendingGroupChange.action === "join"
             : Boolean(speaker.member);
+          const onlyMember = speaker.coordinator && members.length <= 1;
           const status = speaker.coordinator
             ? "Playing"
             : pending
               ? (this._pendingGroupChange.action === "join" ? "Joining…" : "Leaving…")
               : (member ? "Joined" : "Add");
+          const detail = speaker.coordinator
+            ? (onlyMember ? "Current playback" : "Current playback · tap to remove")
+            : "Tap to " + (member ? "remove" : "add");
           return `
             <button class="dynamic-group-option ${member ? "joined" : ""} ${pending ? "pending" : ""}"
               data-group-player="${this._escape(speaker.player_id)}"
-              ${speaker.coordinator || !speaker.available ? "disabled" : ""}
+              ${onlyMember || !speaker.available ? "disabled" : ""}
               aria-pressed="${member}" aria-busy="${pending}">
               <span class="dynamic-group-mark">${pending ? "◌" : member ? "✓" : "○"}</span>
               <span class="dynamic-group-copy"><strong>${this._escape(speaker.name)}</strong>
-                <small>${speaker.coordinator ? "Current playback" : "Tap to " + (member ? "remove" : "add")}</small>
+                <small>${detail}</small>
               </span>
               <span class="dynamic-group-status">${status}</span>
             </button>
           `;
         }).join("")}
       </div>
+      ${balance}
     `;
   }
 
@@ -276,8 +306,10 @@ class FamilyMusicCard extends HTMLElement {
     const speaker = this._groupTopology?.speakers?.find(
       (item) => item.player_id === memberPlayerId
     );
-    if (!speaker || speaker.coordinator || !speaker.available) return;
+    if (!speaker || !speaker.available) return;
+    const members = this._groupTopology?.speakers?.filter((item) => item.member) || [];
     const action = speaker.member ? "leave" : "join";
+    if (action === "leave" && members.length <= 1) return;
     this._pendingGroupChange = {
       memberPlayerId,
       action,
@@ -285,11 +317,15 @@ class FamilyMusicCard extends HTMLElement {
     };
     this._renderNowOverlays();
     try {
-      await this._ws("family_music/group_member", {
+      const result = await this._ws("family_music/group_member", {
         player_entity_id: this._selectedPlayer,
         member_player_id: memberPlayerId,
         action,
       });
+      if (result?.selected_player_entity_id) {
+        this._selectedPlayer = result.selected_player_entity_id;
+        localStorage.setItem("family-music-card-player", this._selectedPlayer);
+      }
       this._groupTopologyFor = null;
       await this._loadGroupTopology(true);
     } catch (_error) {
@@ -467,8 +503,14 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
+  _balanceMembers() {
+    if (this._isSelectedGroup()) return this._groupMembers;
+    return (this._groupTopology?.speakers || []).filter((speaker) => speaker.member);
+  }
+
   _initializeSpeakerBalance() {
-    const samples = this._groupMembers
+    const members = this._balanceMembers();
+    const samples = members
       .map((member) => {
         const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
         return volume == null ? null : Math.round(volume * 100);
@@ -481,10 +523,13 @@ class FamilyMusicCard extends HTMLElement {
     }
     this._mixBaselinePercent = samples.reduce((sum, value) => sum + value, 0) / samples.length;
     this._memberTrimValues.clear();
-    this._groupMembers.forEach((member) => {
+    members.forEach((member) => {
       const volume = this._hass?.states?.[member.entity_id]?.attributes?.volume_level;
       const percent = volume == null ? this._mixBaselinePercent : Math.round(volume * 100);
-      const trim = Math.max(-12, Math.min(12, Math.round((percent - this._mixBaselinePercent) / 2)));
+      const trim = Math.max(
+        -12,
+        Math.min(12, Math.round((percent - this._mixBaselinePercent) / 2))
+      );
       this._memberTrimValues.set(member.entity_id, trim);
     });
   }
@@ -495,10 +540,11 @@ class FamilyMusicCard extends HTMLElement {
   }
 
   _resetSpeakerBalance() {
+    const members = this._balanceMembers();
     this._memberTrimValues.clear();
-    this._groupMembers.forEach((member) => this._memberTrimValues.set(member.entity_id, 0));
+    members.forEach((member) => this._memberTrimValues.set(member.entity_id, 0));
     const baseline = Math.max(0, Math.min(100, Math.round(this._mixBaselinePercent || 0)));
-    this._groupMembers.forEach((member) => {
+    members.forEach((member) => {
       this._queueVolumeWrite(
         member.entity_id,
         baseline,
@@ -528,7 +574,9 @@ class FamilyMusicCard extends HTMLElement {
         if (!entityId) return;
         const trim = Math.max(-12, Math.min(12, Number(event.target.value || 0)));
         this._memberTrimValues.set(entityId, trim);
-        const member = this._groupMembers.find((item) => item.entity_id === entityId);
+        const member = this._balanceMembers().find(
+          (item) => item.entity_id === entityId
+        );
         const targetPercent = this._trimTargetPercent(trim);
         this._queueVolumeWrite(
           entityId,
