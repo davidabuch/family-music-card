@@ -1,3 +1,10 @@
+## 0.2.27
+
+- Allow removing the original Sonos coordinator when other dynamic group members remain; Music Assistant transfers the active sync session to a survivor.
+- Follow the surviving speaker automatically after coordinator removal.
+- Add Speaker Balance directly to dynamic groups so member prominence can be adjusted without switching destinations.
+- Keep the existing Less / Neutral / More balance model and direct per-speaker volume path.
+
 ## 0.2.26
 
 - Add dynamic ad-hoc Sonos grouping for physical speakers in the standalone Family Music app.
