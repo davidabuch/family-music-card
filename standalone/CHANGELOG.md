@@ -1,3 +1,10 @@
+## 0.2.26
+
+- Add dynamic ad-hoc Sonos grouping for physical speakers in the standalone Family Music app.
+- Join and leave through Music Assistant's native Sonos grouping commands so playback remains one synchronized Sonos session.
+- Confirm membership from authoritative Music Assistant player topology; pending UI never becomes a phantom joined state.
+- Preserve permanent Music Assistant sync-group presets; this slice does not mutate their membership.
+
 # Changelog
 
 ## 0.2.25
