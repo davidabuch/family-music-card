@@ -31,3 +31,16 @@
 .transport .mode-button svg{width:23px;height:23px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
 .transport button:disabled{opacity:.3;cursor:not-allowed;filter:grayscale(1)}
 .transport .mode-button.active{color:#67b7ff}
+
+.group-help{color:#aaa;font-size:13px;line-height:1.35;margin:0 4px 12px}
+.group-speaker-list{display:flex;flex-direction:column;gap:6px}
+.group-speaker-option{width:100%;min-height:58px;border:0;border-radius:15px;background:transparent;color:#fff;display:grid;grid-template-columns:30px minmax(0,1fr) 74px;gap:9px;align-items:center;padding:9px 10px;text-align:left}
+.group-speaker-option.joined{background:#ffffff0d}
+.group-speaker-option.pending{background:#ffffff14}
+.group-speaker-option:disabled{opacity:1}
+.group-speaker-mark{font-size:21px;text-align:center}
+.group-speaker-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.group-speaker-copy strong{font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.group-speaker-copy small{color:#888;font-size:11px}
+.group-speaker-status{font-size:11px;color:#aaa;text-align:right;font-weight:800}
+.group-speaker-option.pending .group-speaker-mark{animation:spin .8s linear infinite}
