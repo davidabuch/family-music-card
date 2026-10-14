@@ -509,7 +509,10 @@ async def _delegate_sonos_coordinator(
         data=body.encode(),
         headers={
             "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#DelegateGroupCoordinationTo"',
+            "SOAPACTION": (
+                '"urn:schemas-upnp-org:service:AVTransport:1'
+                '#DelegateGroupCoordinationTo"'
+            ),
         },
         timeout=4,
     ) as response:
