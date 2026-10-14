@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from pathlib import Path
 from typing import Any
@@ -15,7 +14,6 @@ from homeassistant.components.music_assistant.helpers import get_music_assistant
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CARD_PATH, CARD_URL, DOMAIN, VERSION
 
@@ -455,19 +453,11 @@ def _ma_sonos_group_context(
         values = leader.get(key)
         if isinstance(values, list):
             member_ids.update(str(value) for value in values if isinstance(value, str))
-    ordered_member_ids = [leader_id]
-    for key in ("group_members", "group_childs"):
-        values = leader.get(key)
-        if isinstance(values, list):
-            for value in values:
-                if isinstance(value, str) and value not in ordered_member_ids:
-                    ordered_member_ids.append(value)
     return {
         "selected": selected,
         "leader": leader,
         "leader_id": leader_id,
         "member_ids": member_ids,
-        "ordered_member_ids": ordered_member_ids,
         "by_id": by_id,
         "can_group_with": {
             str(value)
@@ -475,94 +465,6 @@ def _ma_sonos_group_context(
             if isinstance(value, str)
         },
     }
-
-
-def _sonos_ip(player: dict[str, Any]) -> str | None:
-    device_info = player.get("device_info")
-    if not isinstance(device_info, dict):
-        return None
-    value = device_info.get("ip_address")
-    return value if isinstance(value, str) and value else None
-
-
-async def _delegate_sonos_coordinator(
-    hass: HomeAssistant, leader: dict[str, Any], successor_id: str
-) -> None:
-    """Delegate coordinator role natively on Sonos without restarting playback."""
-    ip_address = _sonos_ip(leader)
-    if not ip_address:
-        raise RuntimeError("Sonos coordinator IP address is unavailable")
-    body = f"""<?xml version="1.0" encoding="utf-8"?>
-<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
- s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
-  <s:Body>
-    <u:DelegateGroupCoordinationTo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
-      <InstanceID>0</InstanceID>
-      <NewCoordinator>{successor_id}</NewCoordinator>
-      <RejoinGroup>1</RejoinGroup>
-    </u:DelegateGroupCoordinationTo>
-  </s:Body>
-</s:Envelope>"""
-    session = async_get_clientsession(hass)
-    async with session.post(
-        f"http://{ip_address}:1400/MediaRenderer/AVTransport/Control",
-        data=body.encode(),
-        headers={
-            "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPACTION": (
-                '"urn:schemas-upnp-org:service:AVTransport:1'
-                '#DelegateGroupCoordinationTo"'
-            ),
-        },
-        timeout=4,
-    ) as response:
-        if response.status >= 400:
-            raise RuntimeError(f"Sonos delegate failed with HTTP {response.status}")
-        await response.read()
-
-
-async def _wait_for_ma_sonos_successor(
-    mass, successor_id: str, attempts: int = 12
-) -> list[dict[str, Any]]:
-    """Wait for MA to observe the delegated Sonos coordinator."""
-    latest: list[dict[str, Any]] = []
-    for _ in range(attempts):
-        raw = await mass.send_command("players/all")
-        latest = (
-            [player for player in raw if isinstance(player, dict)]
-            if isinstance(raw, list)
-            else []
-        )
-        try:
-            context = _ma_sonos_group_context(latest, successor_id)
-        except ValueError:
-            context = None
-        if context and context["leader_id"] == successor_id:
-            return latest
-        await asyncio.sleep(0.15)
-    raise RuntimeError("Native Sonos coordinator handoff was not confirmed")
-
-
-async def _wait_for_ma_sonos_departure(
-    mass, successor_id: str, departing_id: str, attempts: int = 12
-) -> list[dict[str, Any]]:
-    """Wait for the former coordinator to leave the delegated Sonos group."""
-    latest: list[dict[str, Any]] = []
-    for _ in range(attempts):
-        raw = await mass.send_command("players/all")
-        latest = (
-            [player for player in raw if isinstance(player, dict)]
-            if isinstance(raw, list)
-            else []
-        )
-        try:
-            context = _ma_sonos_group_context(latest, successor_id)
-        except ValueError:
-            context = None
-        if context and departing_id not in context["member_ids"]:
-            return latest
-        await asyncio.sleep(0.15)
-    raise RuntimeError("Former Sonos coordinator did not leave the group")
 
 
 def _ma_player_id_for_entity(registry, entity_id: str) -> str | None:
@@ -706,73 +608,38 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
                     child_player_ids=[member_id],
                 )
         selected_player_id = None
-        handoff = None
         if msg["action"] == "leave" and member_id in context["member_ids"]:
             remaining_ids = [
                 item for item in context["member_ids"] if item != member_id
             ]
             if not remaining_ids:
                 raise ValueError("At least one Sonos speaker must remain in the session")
-            if member_id != context["leader_id"]:
-                await mass.send_command("players/cmd/ungroup", player_id=member_id)
-            else:
-                ordered_remaining = [
-                    item
-                    for item in context["ordered_member_ids"]
-                    if item != context["leader_id"] and item in context["member_ids"]
-                ]
-                selected_player_id = (
-                    ordered_remaining[0] if ordered_remaining else remaining_ids[0]
+            await mass.send_command("players/cmd/ungroup", player_id=member_id)
+            if member_id == context["leader_id"]:
+                raw_after = await mass.send_command("players/all")
+                players_after = (
+                    [player for player in raw_after if isinstance(player, dict)]
+                    if isinstance(raw_after, list)
+                    else []
                 )
-                try:
-                    await _delegate_sonos_coordinator(
-                        hass, context["leader"], selected_player_id
-                    )
-                except (RuntimeError, TimeoutError, OSError):
-                    await mass.send_command("players/cmd/ungroup", player_id=member_id)
-                    handoff = "music_assistant_fallback"
-                    raw_after = await mass.send_command("players/all")
-                    players_after = (
-                        [player for player in raw_after if isinstance(player, dict)]
-                        if isinstance(raw_after, list)
-                        else []
-                    )
-                    for candidate_id in remaining_ids:
-                        try:
-                            candidate_context = _ma_sonos_group_context(
-                                players_after, candidate_id
-                            )
-                        except ValueError:
-                            continue
-                        if candidate_context["leader_id"] in remaining_ids:
-                            selected_player_id = candidate_context["leader_id"]
-                            break
-                else:
-                    await _wait_for_ma_sonos_successor(
-                        mass, selected_player_id
-                    )
-                    # Delegate with RejoinGroup=true first, then remove the old
-                    # coordinator as a normal child. This keeps the Sonos
-                    # Cloud Queue session bound to its original MA endpoint and
-                    # avoids MA's stop/resume leader-transfer path.
-                    await mass.send_command(
-                        "players/cmd/ungroup", player_id=context["leader_id"]
-                    )
-                    await _wait_for_ma_sonos_departure(
-                        mass, selected_player_id, context["leader_id"]
-                    )
-                    handoff = "native_sonos_delegate"
+                selected_player_id = remaining_ids[0]
+                for candidate_id in remaining_ids:
+                    try:
+                        candidate_context = _ma_sonos_group_context(
+                            players_after, candidate_id
+                        )
+                    except ValueError:
+                        continue
+                    if candidate_context["leader_id"] in remaining_ids:
+                        selected_player_id = candidate_context["leader_id"]
+                        break
     except ValueError as err:
         connection.send_error(msg["id"], "invalid_group_change", str(err))
         return
 
     response = {"accepted": True}
-    if handoff:
-        response["handoff"] = handoff
     if selected_player_id:
         response["selected_player_id"] = selected_player_id
-        if handoff == "native_sonos_delegate":
-            response["session_queue_id"] = player_id
         response["selected_player_entity_id"] = next(
             (
                 entry.entity_id
