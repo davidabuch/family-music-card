@@ -699,20 +699,91 @@ function updateGroupOverlay() {
   });
 }
 
+function groupBalanceMarkup(memberIds) {
+  const members = Array.from(memberIds)
+    .map((id) => state.players.find((player) => player.player_id === id))
+    .filter(Boolean);
+  if (members.length < 2) return "";
+  const avg = Math.round(
+    members.reduce((sum, player) => sum + effectiveVolume(player), 0) / members.length
+  );
+  return `
+    <div class="group-balance-section">
+      <h4>Speaker Balance</h4>
+      <div class="balance-help">Shape where the sound comes from without switching speakers.</div>
+      ${members.map((player) => {
+        const trim = Math.max(
+          -12,
+          Math.min(12, Math.round((effectiveVolume(player) - avg) / 2))
+        );
+        return `<div class="balance-row">
+          <div class="balance-name">${escapeHtml(playerName(player))}</div>
+          <input class="member-trim" data-member="${escapeHtml(player.player_id)}"
+            data-base="${avg}" type="range" min="-12" max="12" step="1" value="${trim}"
+            aria-label="${escapeHtml(playerName(player))} balance">
+        </div>`;
+      }).join("")}
+      <div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div>
+      <button class="reset-balance" data-reset-balance>Reset Balance</button>
+    </div>
+  `;
+}
+
+function wireMemberTrimControls() {
+  document.querySelectorAll(".member-trim").forEach((slider) => {
+    const apply = () => {
+      const target = Math.max(
+        0,
+        Math.min(100, Number(slider.dataset.base) + Number(slider.value) * 2)
+      );
+      const player = state.players.find(
+        (item) => item.player_id === slider.dataset.member
+      );
+      if (!player) return;
+      state.pendingVolume = {
+        playerId: player.player_id,
+        level: target,
+        expiresAt: Date.now() + 5000,
+      };
+      api("/api/volume", {
+        method: "POST",
+        body: JSON.stringify({player_id: player.player_id, level: target}),
+      }).catch((error) => showToast(error.message, 3000));
+    };
+    slider.addEventListener("input", apply);
+    slider.addEventListener("change", apply);
+  });
+  document.querySelectorAll("[data-reset-balance]").forEach((button) => {
+    button.addEventListener("click", () => {
+      button.closest(".group-balance-section, .popover")
+        ?.querySelectorAll(".member-trim")
+        .forEach((slider) => {
+          slider.value = 0;
+          slider.dispatchEvent(new Event("change"));
+        });
+    });
+  });
+}
+
 async function toggleGroupMember(memberId) {
   const player = selectedPlayer();
   const context = sonosGroupContext(player);
   if (!player || !context || state.pendingGroup) return;
-  if (memberId === context.leaderId) return;
   const action = context.memberIds.has(memberId) ? "leave" : "join";
+  if (action === "leave" && context.memberIds.size <= 1) return;
   state.pendingGroup = {memberId, action, expiresAt: Date.now() + 7000};
   updateGroupOverlay();
   try {
-    await api("/api/group-member", {
+    const result = await api("/api/group-member", {
       method: "POST",
       body: JSON.stringify({player_id: player.player_id, member_id: memberId, action}),
     });
+    if (result?.selected_player_id) {
+      state.selectedPlayerId = result.selected_player_id;
+      localStorage.setItem("family-music-player-id", result.selected_player_id);
+    }
     await refreshState();
+    if (state.groupOpen) renderGroupOverlay();
   } catch (error) {
     state.pendingGroup = null;
     updateGroupOverlay();
@@ -732,19 +803,25 @@ function renderGroupOverlay() {
   const rows = speakers.map((member) => {
     const current = groupButtonState(member.player_id);
     const coordinator = member.player_id === context.leaderId;
-    return `<button class="group-speaker-option ${current.checked?"joined":""}" data-member="${escapeHtml(member.player_id)}" aria-pressed="${current.checked}" ${coordinator?"disabled":""}>
+    const onlyMember = coordinator && context.memberIds.size <= 1;
+    const detail = coordinator
+      ? (onlyMember ? "Current playback" : "Current playback · tap to remove")
+      : "Tap to " + (current.checked ? "remove" : "add");
+    return `<button class="group-speaker-option ${current.checked?"joined":""}" data-member="${escapeHtml(member.player_id)}" aria-pressed="${current.checked}" ${onlyMember?"disabled":""}>
       <span class="group-speaker-mark">${current.checked?"✓":"○"}</span>
-      <span class="group-speaker-copy"><strong>${escapeHtml(playerName(member))}</strong><small>${coordinator?"Current playback":"Tap to "+(current.checked?"remove":"add")}</small></span>
+      <span class="group-speaker-copy"><strong>${escapeHtml(playerName(member))}</strong><small>${detail}</small></span>
       <span class="group-speaker-status">${coordinator?"Playing":current.label}</span>
     </button>`;
   }).join("");
+  const balance = groupBalanceMarkup(context.memberIds);
   $("#overlay").classList.add("open");
   $(".tabbar")?.classList.add("overlay-hidden");
-  $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Group Speakers</h3><div class="group-help">Add a speaker to this Sonos session. Playback stays synchronized.</div><div class="group-speaker-list">${rows}</div></div>`;
+  $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Group Speakers</h3><div class="group-help">Add or remove speakers from this synchronized Sonos session.</div><div class="group-speaker-list">${rows}</div>${balance}</div>`;
   $(".scrim").addEventListener("click", closeOverlay);
   document.querySelectorAll(".group-speaker-option[data-member]").forEach((button) => {
     if (!button.disabled) button.addEventListener("click", () => toggleGroupMember(button.dataset.member));
   });
+  wireMemberTrimControls();
 }
 
 function renderBalanceOverlay() {
@@ -760,24 +837,13 @@ function renderBalanceOverlay() {
         const trim = Math.max(-12, Math.min(12, Math.round((effectiveVolume(p)-avg)/2)));
         return `<div class="balance-row"><div class="balance-name">${escapeHtml(playerName(p))}</div><input class="member-trim" data-member="${escapeHtml(p.player_id)}" data-base="${avg}" type="range" min="-12" max="12" step="1" value="${trim}"></div>`;
       }).join("") +
-      '<div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div><button id="resetBalance" class="reset-balance">Reset balance</button>';
+      '<div class="balance-scale"><span>Less</span><span>Neutral</span><span>More</span></div><button class="reset-balance" data-reset-balance>Reset Balance</button>';
   }
   $("#overlay").classList.add("open");
   $(".tabbar")?.classList.add("overlay-hidden");
   $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Speaker Balance</h3>${body}</div>`;
   $(".scrim").addEventListener("click", closeOverlay);
-  document.querySelectorAll(".member-trim").forEach((slider) => {
-    const apply = (flush) => {
-      const target = Math.max(0,Math.min(100,Number(slider.dataset.base)+Number(slider.value)*2));
-      const p = state.players.find((x)=>x.player_id===slider.dataset.member);
-      if (p) {
-        state.pendingVolume={playerId:p.player_id,level:target,expiresAt:Date.now()+5000};
-        api("/api/volume",{method:"POST",body:JSON.stringify({player_id:p.player_id,level:target})}).catch((e)=>showToast(e.message,3000));
-      }
-    };
-    slider.addEventListener("input",()=>apply(false)); slider.addEventListener("change",()=>apply(true));
-  });
-  $("#resetBalance")?.addEventListener("click",()=>document.querySelectorAll(".member-trim").forEach((slider)=>{slider.value=0;slider.dispatchEvent(new Event("change"));}));
+  wireMemberTrimControls();
 }
 
 let voiceRecognition = null;
