@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.27"' in app_config
+    assert 'version: "0.2.28"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -751,3 +751,12 @@ def test_dynamic_group_ui_has_member_balance_and_coordinator_removal():
     assert "selected_player_id" in js
     assert "family-music-player-id" in js
     assert ".group-balance-section" in css
+
+
+def test_dynamic_group_popup_waits_for_authoritative_membership_without_reopen():
+    js = (ROOT / "standalone" / "web" / "app.js").read_text()
+
+    assert "waitForGroupMembership" in js
+    assert "for (let attempt = 0; attempt < 10; attempt += 1)" in js
+    assert "authoritativeGroupMembership(memberId) === expected" in js
+    assert "if (state.groupOpen) renderGroupOverlay()" in js
