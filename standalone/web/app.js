@@ -765,6 +765,24 @@ function wireMemberTrimControls() {
   });
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function waitForGroupMembership(memberId, action) {
+  const expected = action === "join";
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await refreshState();
+    if (authoritativeGroupMembership(memberId) === expected) {
+      state.pendingGroup = null;
+      if (state.groupOpen) renderGroupOverlay();
+      return true;
+    }
+    await sleep(180);
+  }
+  return false;
+}
+
 async function toggleGroupMember(memberId) {
   const player = selectedPlayer();
   const context = sonosGroupContext(player);
@@ -782,8 +800,12 @@ async function toggleGroupMember(memberId) {
       state.selectedPlayerId = result.selected_player_id;
       localStorage.setItem("family-music-player-id", result.selected_player_id);
     }
-    await refreshState();
-    if (state.groupOpen) renderGroupOverlay();
+    const confirmed = await waitForGroupMembership(memberId, action);
+    if (!confirmed) {
+      state.pendingGroup = null;
+      updateGroupOverlay();
+      showToast("Sonos group change was not confirmed", 3000);
+    }
   } catch (error) {
     state.pendingGroup = null;
     updateGroupOverlay();
