@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import secrets
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -185,15 +186,100 @@ def _sonos_group_context(
         and player.get("type") != "group"
         and isinstance(player.get("player_id"), str)
     ]
+    ordered_member_ids = [leader_id]
+    for key in ("group_members", "group_childs"):
+        values = leader.get(key)
+        if isinstance(values, list):
+            for value in values:
+                if isinstance(value, str) and value not in ordered_member_ids:
+                    ordered_member_ids.append(value)
     return {
         "leader_id": leader_id,
         "leader": leader,
         "selected": selected,
         "member_ids": member_ids,
+        "ordered_member_ids": ordered_member_ids,
         "can_group_with": can_group_with,
         "players": physical,
         "by_id": by_id,
     }
+
+
+def _sonos_ip(player: dict[str, Any]) -> str | None:
+    device_info = player.get("device_info")
+    if not isinstance(device_info, dict):
+        return None
+    value = device_info.get("ip_address")
+    return value if isinstance(value, str) and value else None
+
+
+def _delegate_sonos_coordinator(
+    leader: dict[str, Any], successor_id: str
+) -> None:
+    """Ask Sonos to hand coordination to a current member without restarting playback."""
+    ip_address = _sonos_ip(leader)
+    if not ip_address:
+        raise RuntimeError("Sonos coordinator IP address is unavailable")
+    body = f"""<?xml version="1.0" encoding="utf-8"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+ s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+  <s:Body>
+    <u:DelegateGroupCoordinationTo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
+      <InstanceID>0</InstanceID>
+      <NewCoordinator>{successor_id}</NewCoordinator>
+      <RejoinGroup>0</RejoinGroup>
+    </u:DelegateGroupCoordinationTo>
+  </s:Body>
+</s:Envelope>""".encode()
+    request = urllib.request.Request(
+        f"http://{ip_address}:1400/MediaRenderer/AVTransport/Control",
+        data=body,
+        headers={
+            "Content-Type": 'text/xml; charset="utf-8"',
+            "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#DelegateGroupCoordinationTo"',
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=4) as response:
+        response.read()
+
+
+def _wait_for_sonos_successor(
+    successor_id: str, old_leader_id: str, attempts: int = 12
+) -> list[dict[str, Any]]:
+    """Wait briefly for Music Assistant to observe native Sonos coordinator handoff."""
+    latest: list[dict[str, Any]] = []
+    for _ in range(attempts):
+        latest = get_players()
+        try:
+            context = _sonos_group_context(successor_id, latest)
+        except ValueError:
+            context = None
+        if (
+            context
+            and context["leader_id"] == successor_id
+            and old_leader_id not in context["member_ids"]
+        ):
+            return latest
+        time.sleep(0.15)
+    raise RuntimeError("Native Sonos coordinator handoff was not confirmed")
+
+
+def _transfer_ma_queue_without_resume(source_id: str, target_id: str) -> None:
+    """Move MA queue bookkeeping after Sonos already handed off live playback."""
+    queues = get_queues()
+    source = next((q for q in queues if q.get("queue_id") == source_id), None)
+    if not source:
+        return
+    active = bool(source.get("active")) or source.get("state") not in (None, "idle")
+    if not active:
+        return
+    client.command(
+        "player_queues/transfer",
+        source_queue_id=source_id,
+        target_queue_id=target_id,
+        auto_play=False,
+    )
 
 
 def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str, Any]:
@@ -230,28 +316,46 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
         remaining_ids = [item for item in member_ids if item != member_id]
         if not remaining_ids:
             raise ValueError("At least one Sonos speaker must remain in the session")
-        result = client.command("players/cmd/ungroup", player_id=member_id)
         if member_id != leader_id:
+            result = client.command("players/cmd/ungroup", player_id=member_id)
             return {"accepted": True, "leader_id": leader_id, "result": result}
 
-        # Music Assistant transfers sync leadership when an active leader is
-        # ungrouped. Re-observe authoritative topology so the UI follows the
-        # surviving session instead of staying attached to the removed leader.
-        refreshed = get_players()
-        successor_id = remaining_ids[0]
-        for candidate_id in remaining_ids:
-            try:
-                candidate_context = _sonos_group_context(candidate_id, refreshed)
-            except ValueError:
-                continue
-            if candidate_context["leader_id"] in remaining_ids:
-                successor_id = candidate_context["leader_id"]
-                break
+        ordered_remaining = [
+            item
+            for item in context["ordered_member_ids"]
+            if item != leader_id and item in member_ids
+        ]
+        successor_id = ordered_remaining[0] if ordered_remaining else remaining_ids[0]
+        try:
+            _delegate_sonos_coordinator(context["leader"], successor_id)
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError, RuntimeError):
+            # Safe fallback: MA's queue-transfer path is proven, but may have a brief gap.
+            result = client.command("players/cmd/ungroup", player_id=member_id)
+            refreshed = get_players()
+            for candidate_id in remaining_ids:
+                try:
+                    candidate_context = _sonos_group_context(candidate_id, refreshed)
+                except ValueError:
+                    continue
+                if candidate_context["leader_id"] in remaining_ids:
+                    successor_id = candidate_context["leader_id"]
+                    break
+            return {
+                "accepted": True,
+                "leader_id": successor_id,
+                "selected_player_id": successor_id,
+                "handoff": "music_assistant_fallback",
+                "result": result,
+            }
+
+        _wait_for_sonos_successor(successor_id, leader_id)
+        _transfer_ma_queue_without_resume(leader_id, successor_id)
         return {
             "accepted": True,
             "leader_id": successor_id,
             "selected_player_id": successor_id,
-            "result": result,
+            "handoff": "native_sonos_delegate",
+            "result": None,
         }
 
     raise ValueError("Invalid group action")
