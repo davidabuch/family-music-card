@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.16"
+    assert manifest["version"] == "0.3.21"
     assert card_path.exists()
 
 
@@ -180,7 +180,8 @@ def test_now_playing_bottom_action_model():
     assert 'id="destinationButton"' in card_text
     assert "Change playback destination" in card_text
     assert 'id="moreButton"' in card_text
-    assert 'icon="mdi:speaker-multiple"' in card_text
+    assert '<ha-icon icon="mdi:speaker-multiple"></ha-icon>' in card_text
+    assert '<ha-icon icon="mdi:speaker"></ha-icon>' in card_text
     assert "_renderDestinationMenu()" in card_text
     assert "_renderMoreMenu()" in card_text
     assert "Play in" in card_text
@@ -533,3 +534,14 @@ def test_ha_card_group_popup_waits_for_authoritative_membership_without_reopen()
     assert "for (let attempt = 0; attempt < 10; attempt += 1)" in card_text
     assert "Boolean(member?.member) === expected" in card_text
     assert "this._renderNowOverlays()" in card_text
+
+
+def test_now_playing_speaker_icons_match_standalone_semantics():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+
+    destination = card_text.split('id="destinationButton"', 1)[1].split("</button>", 1)[0]
+    more = card_text.split('id="moreButton"', 1)[1].split("</button>", 1)[0]
+    assert 'icon="mdi:speaker-multiple"' in destination
+    assert 'icon="mdi:speaker"' in more
