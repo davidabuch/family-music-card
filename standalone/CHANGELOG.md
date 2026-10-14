@@ -1,3 +1,10 @@
+## 0.2.29
+
+- Prefer Sonos native coordinator delegation when removing the currently playing coordinator, so the surviving group keeps its live Sonos session instead of relying on Music Assistant's stop/resume leadership transfer.
+- After Sonos confirms the new coordinator, move Music Assistant queue bookkeeping to the survivor with auto-play disabled.
+- Retain the proven Music Assistant coordinator-transfer path as a safe fallback if native Sonos delegation is unavailable or rejected.
+- Ordinary non-coordinator speaker removal is unchanged.
+
 ## 0.2.28
 
 - Keep the Group Speakers popup live after join/remove commands by polling authoritative Music Assistant topology until the requested membership change is visible.

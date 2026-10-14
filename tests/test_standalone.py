@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.28"' in app_config
+    assert 'version: "0.2.29"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -681,49 +681,82 @@ def test_dynamic_grouping_ui_is_optimistic_but_waits_for_authoritative_state():
 
 def test_dynamic_group_can_remove_coordinator_and_follow_successor(monkeypatch):
     calls = []
-    observations = iter([
-        [
-            {
-                "player_id": "RINCON_MASTER",
-                "provider": "sonos",
-                "type": "player",
-                "available": True,
-                "group_members": ["RINCON_MASTER", "RINCON_KITCHEN"],
-                "group_childs": ["RINCON_MASTER", "RINCON_KITCHEN"],
-                "can_group_with": ["RINCON_KITCHEN"],
-            },
-            {
-                "player_id": "RINCON_KITCHEN",
-                "provider": "sonos",
-                "type": "player",
-                "available": True,
-                "synced_to": "RINCON_MASTER",
-                "group_members": [],
-                "group_childs": [],
-                "can_group_with": ["RINCON_MASTER"],
-            },
-        ],
-        [
-            {
-                "player_id": "RINCON_MASTER",
-                "provider": "sonos",
-                "type": "player",
-                "available": True,
-                "synced_to": "RINCON_KITCHEN",
-                "group_members": [],
-                "group_childs": [],
-            },
-            {
-                "player_id": "RINCON_KITCHEN",
-                "provider": "sonos",
-                "type": "player",
-                "available": True,
-                "group_members": ["RINCON_KITCHEN"],
-                "group_childs": ["RINCON_KITCHEN"],
-            },
-        ],
-    ])
-    monkeypatch.setattr(standalone, "get_players", lambda: next(observations))
+    players = [
+        {
+            "player_id": "RINCON_MASTER",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "group_members": ["RINCON_MASTER", "RINCON_KITCHEN"],
+            "group_childs": ["RINCON_MASTER", "RINCON_KITCHEN"],
+            "can_group_with": ["RINCON_KITCHEN"],
+        },
+        {
+            "player_id": "RINCON_KITCHEN",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "synced_to": "RINCON_MASTER",
+            "group_members": [],
+            "group_childs": [],
+            "can_group_with": ["RINCON_MASTER"],
+        },
+    ]
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(
+        standalone, "_delegate_sonos_coordinator",
+        lambda leader, successor: calls.append(("delegate", successor)),
+    )
+    monkeypatch.setattr(
+        standalone, "_wait_for_sonos_successor",
+        lambda successor, old_leader, attempts=12: players,
+    )
+    monkeypatch.setattr(
+        standalone, "_transfer_ma_queue_without_resume",
+        lambda source, target: calls.append(("transfer", source, target)),
+    )
+
+    result = standalone.change_sonos_group(
+        "RINCON_MASTER", "RINCON_MASTER", "leave"
+    )
+
+    assert calls == [
+        ("delegate", "RINCON_KITCHEN"),
+        ("transfer", "RINCON_MASTER", "RINCON_KITCHEN"),
+    ]
+    assert result["selected_player_id"] == "RINCON_KITCHEN"
+    assert result["leader_id"] == "RINCON_KITCHEN"
+    assert result["handoff"] == "native_sonos_delegate"
+
+
+def test_dynamic_group_coordinator_handoff_falls_back_to_ma(monkeypatch):
+    calls = []
+    players = [
+        {
+            "player_id": "RINCON_MASTER",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "group_members": ["RINCON_MASTER", "RINCON_KITCHEN"],
+            "group_childs": ["RINCON_MASTER", "RINCON_KITCHEN"],
+            "can_group_with": ["RINCON_KITCHEN"],
+        },
+        {
+            "player_id": "RINCON_KITCHEN",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "synced_to": "RINCON_MASTER",
+            "group_members": [],
+            "group_childs": [],
+        },
+    ]
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(
+        standalone,
+        "_delegate_sonos_coordinator",
+        lambda leader, successor: (_ for _ in ()).throw(RuntimeError("no native handoff")),
+    )
     monkeypatch.setattr(
         standalone.client,
         "command",
@@ -735,9 +768,7 @@ def test_dynamic_group_can_remove_coordinator_and_follow_successor(monkeypatch):
     )
 
     assert calls == [("players/cmd/ungroup", {"player_id": "RINCON_MASTER"})]
-    assert result["selected_player_id"] == "RINCON_KITCHEN"
-    assert result["leader_id"] == "RINCON_KITCHEN"
-
+    assert result["handoff"] == "music_assistant_fallback"
 
 def test_dynamic_group_ui_has_member_balance_and_coordinator_removal():
     js = (ROOT / "standalone" / "web" / "app.js").read_text()
@@ -760,3 +791,14 @@ def test_dynamic_group_popup_waits_for_authoritative_membership_without_reopen()
     assert "for (let attempt = 0; attempt < 10; attempt += 1)" in js
     assert "authoritativeGroupMembership(memberId) === expected" in js
     assert "if (state.groupOpen) renderGroupOverlay()" in js
+
+
+def test_gapless_coordinator_handoff_uses_sonos_delegate_and_nonresuming_queue_move():
+    server = (ROOT / "standalone" / "server.py").read_text()
+
+    assert "DelegateGroupCoordinationTo" in server
+    assert "<RejoinGroup>0</RejoinGroup>" in server
+    assert '"player_queues/transfer"' in server
+    assert "auto_play=False" in server
+    assert '"handoff": "native_sonos_delegate"' in server
+    assert '"handoff": "music_assistant_fallback"' in server
