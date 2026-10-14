@@ -236,7 +236,10 @@ def _delegate_sonos_coordinator(
         data=body,
         headers={
             "Content-Type": 'text/xml; charset="utf-8"',
-            "SOAPACTION": '"urn:schemas-upnp-org:service:AVTransport:1#DelegateGroupCoordinationTo"',
+            "SOAPACTION": (
+                '"urn:schemas-upnp-org:service:AVTransport:1'
+                '#DelegateGroupCoordinationTo"'
+            ),
         },
         method="POST",
     )
