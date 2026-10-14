@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.13";
+const CARD_VERSION = "0.3.14";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -47,6 +47,10 @@ class FamilyMusicCard extends HTMLElement {
     this._nativePeerLoadInFlight = false;
     this._pendingPlayUri = null;
     this._pendingPlayName = null;
+    this._groupTopology = null;
+    this._groupTopologyFor = null;
+    this._groupTopologyLoading = false;
+    this._pendingGroupChange = null;
   }
 
   setConfig(config) {
@@ -184,6 +188,116 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
+  async _loadGroupTopology(force = false) {
+    if (!this._selectedPlayer || !this._hass || this._isSelectedGroup()) {
+      this._groupTopology = null;
+      this._groupTopologyFor = this._selectedPlayer;
+      this._groupTopologyLoading = false;
+      return;
+    }
+    if (!force && this._groupTopologyFor === this._selectedPlayer) return;
+    if (this._groupTopologyLoading) return;
+    const player = this._selectedPlayer;
+    this._groupTopologyLoading = true;
+    if (this._moreOpen) this._renderNowOverlays();
+    try {
+      const topology = await this._ws("family_music/group_topology", {
+        player_entity_id: player,
+      });
+      if (this._selectedPlayer === player) {
+        this._groupTopology = topology?.available ? topology : null;
+        this._groupTopologyFor = player;
+        if (this._pendingGroupChange && this._groupTopology) {
+          const member = this._groupTopology.speakers?.find(
+            (item) => item.player_id === this._pendingGroupChange.memberPlayerId
+          );
+          const confirmed = Boolean(member?.member) ===
+            (this._pendingGroupChange.action === "join");
+          if (confirmed || Date.now() >= this._pendingGroupChange.until) {
+            this._pendingGroupChange = null;
+          }
+        }
+      }
+    } catch (_error) {
+      if (this._selectedPlayer === player) {
+        this._groupTopology = null;
+        this._groupTopologyFor = player;
+      }
+    } finally {
+      this._groupTopologyLoading = false;
+      if (this._view === "now" && this._selectedPlayer === player && this._moreOpen) {
+        this._renderNowOverlays();
+      }
+    }
+  }
+
+  _dynamicGroupMarkup() {
+    if (this._groupTopologyLoading) {
+      return '<div class="menu-status">Loading speakers…</div>';
+    }
+    const speakers = this._groupTopology?.speakers;
+    if (!Array.isArray(speakers) || !speakers.length) {
+      return '<div class="menu-status">Dynamic grouping is unavailable for this destination.</div>';
+    }
+    return `
+      <div class="popover-title">Group Speakers</div>
+      <div class="balance-help">Add a speaker to this Sonos session. Playback stays synchronized.</div>
+      <div class="dynamic-group-list">
+        ${speakers.map((speaker) => {
+          const pending = this._pendingGroupChange?.memberPlayerId === speaker.player_id
+            && Date.now() < this._pendingGroupChange.until;
+          const member = pending
+            ? this._pendingGroupChange.action === "join"
+            : Boolean(speaker.member);
+          const status = speaker.coordinator
+            ? "Playing"
+            : pending
+              ? (this._pendingGroupChange.action === "join" ? "Joining…" : "Leaving…")
+              : (member ? "Joined" : "Add");
+          return `
+            <button class="dynamic-group-option ${member ? "joined" : ""} ${pending ? "pending" : ""}"
+              data-group-player="${this._escape(speaker.player_id)}"
+              ${speaker.coordinator || !speaker.available ? "disabled" : ""}
+              aria-pressed="${member}" aria-busy="${pending}">
+              <span class="dynamic-group-mark">${pending ? "◌" : member ? "✓" : "○"}</span>
+              <span class="dynamic-group-copy"><strong>${this._escape(speaker.name)}</strong>
+                <small>${speaker.coordinator ? "Current playback" : "Tap to " + (member ? "remove" : "add")}</small>
+              </span>
+              <span class="dynamic-group-status">${status}</span>
+            </button>
+          `;
+        }).join("")}
+      </div>
+    `;
+  }
+
+  async _toggleDynamicGroupMember(memberPlayerId) {
+    if (!memberPlayerId || !this._selectedPlayer || this._pendingGroupChange) return;
+    const speaker = this._groupTopology?.speakers?.find(
+      (item) => item.player_id === memberPlayerId
+    );
+    if (!speaker || speaker.coordinator || !speaker.available) return;
+    const action = speaker.member ? "leave" : "join";
+    this._pendingGroupChange = {
+      memberPlayerId,
+      action,
+      until: Date.now() + 7000,
+    };
+    this._renderNowOverlays();
+    try {
+      await this._ws("family_music/group_member", {
+        player_entity_id: this._selectedPlayer,
+        member_player_id: memberPlayerId,
+        action,
+      });
+      this._groupTopologyFor = null;
+      await this._loadGroupTopology(true);
+    } catch (_error) {
+      this._pendingGroupChange = null;
+      this._renderNowOverlays();
+    }
+  }
+
   _destinationIsPlaying(entityId) {
     const maPlaying = this._hass?.states?.[entityId]?.state === "playing";
     const nativeEntityId = this._nativePlayerPeers?.[entityId];
@@ -254,7 +368,7 @@ class FamilyMusicCard extends HTMLElement {
           ? '<button id="resetSpeakerBalance" class="balance-reset" type="button">Reset balance</button>'
           : ""}
       `
-      : '<div class="menu-status">This destination is a single speaker.</div>';
+      : this._dynamicGroupMarkup();
 
     return `
       <div class="now-popover more-popover">
@@ -311,6 +425,11 @@ class FamilyMusicCard extends HTMLElement {
       });
     });
     this._wireMemberVolumePanel();
+    this.shadowRoot.querySelectorAll("[data-group-player]").forEach((button) => {
+      button.addEventListener("click", () => {
+        this._toggleDynamicGroupMember(button.dataset.groupPlayer);
+      });
+    });
   }
 
   async _loadGroupMembers(force = false) {
@@ -1073,6 +1192,9 @@ class FamilyMusicCard extends HTMLElement {
       this._membersExpanded = false;
       this._mixBaselinePercent = null;
       this._memberTrimValues.clear();
+      this._groupTopology = null;
+      this._groupTopologyFor = null;
+      this._pendingGroupChange = null;
       this._optimisticPlayback = null;
       this._optimisticPlaybackUntil = 0;
       this._optimisticShuffle = null;
@@ -1099,14 +1221,17 @@ class FamilyMusicCard extends HTMLElement {
       this._renderNowOverlays();
     });
     this.shadowRoot.getElementById("moreButton")?.addEventListener("click", async () => {
-      if (!this._isSelectedGroup()) return;
       this._moreOpen = !this._moreOpen;
       this._destinationOpen = false;
       this._renderNowOverlays();
       if (this._moreOpen) {
-        this._mixBaselinePercent = null;
-        this._memberTrimValues.clear();
-        await this._loadGroupMembers(true);
+        if (this._isSelectedGroup()) {
+          this._mixBaselinePercent = null;
+          this._memberTrimValues.clear();
+          await this._loadGroupMembers(true);
+        } else {
+          await this._loadGroupTopology(true);
+        }
       }
     });
     this.shadowRoot.getElementById("navNow")?.addEventListener("click", () => this._setView("now"));
@@ -1300,6 +1425,7 @@ class FamilyMusicCard extends HTMLElement {
     this._wireBrowserItems();
     this._wireNowOverlays();
     this._loadGroupMembers(false);
+    if (!this._isSelectedGroup() && this._moreOpen) this._loadGroupTopology(false);
   }
 
   _wireVoiceSearch() {
@@ -1473,15 +1599,11 @@ class FamilyMusicCard extends HTMLElement {
     }
     if (moreButton) {
       const grouped = this._isSelectedGroup();
-      moreButton.disabled = !grouped;
-      moreButton.classList.toggle("disabled", !grouped);
-      moreButton.title = grouped ? "Group speaker controls" : "Single speaker — no group controls";
+      moreButton.disabled = false;
+      moreButton.classList.remove("disabled");
+      moreButton.title = grouped ? "Speaker balance" : "Group speakers";
       moreButton.setAttribute("aria-label", moreButton.title);
-      moreButton.setAttribute("aria-disabled", grouped ? "false" : "true");
-      if (!grouped && this._moreOpen) {
-        this._moreOpen = false;
-        this._renderNowOverlays();
-      }
+      moreButton.setAttribute("aria-disabled", "false");
     }
 
     if (shuffleToggle) {
@@ -1602,7 +1724,7 @@ class FamilyMusicCard extends HTMLElement {
       .bottom-actions{display:grid;grid-template-columns:58px minmax(0,1fr) 58px;gap:12px;align-items:center;margin-top:auto}.bottom-circle,.destination-pill{height:58px;border:1px solid rgba(255,255,255,.26);background:rgba(255,255,255,.10);color:#fff;backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);cursor:pointer}.bottom-circle{width:58px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bottom-circle ha-icon{--mdc-icon-size:29px}.music-search-button{overflow:hidden;padding:0;background:transparent}.music-search-icon{width:100%;height:100%;display:block;border-radius:50%;filter:drop-shadow(0 1px 1px rgba(0,0,0,.16))}.music-search-tile{stroke:rgba(255,255,255,.18);stroke-width:.7}.group-speakers-button ha-icon{--mdc-icon-size:31px}.group-speakers-button:disabled,.group-speakers-button.disabled{opacity:.28;cursor:default;filter:grayscale(1)}.destination-pill{min-width:0;border-radius:999px;padding:0 16px;display:grid;grid-template-columns:28px minmax(0,1fr) 20px;gap:7px;align-items:center;font-size:17px;font-weight:730}.destination-pill>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.destination-pill>ha-icon{--mdc-icon-size:24px}.destination-chevron{opacity:.6}
       .now-overlay{position:absolute;inset:0;z-index:5;pointer-events:none}.now-overlay.open{pointer-events:auto}.overlay-scrim{position:absolute;inset:0;border:0;background:rgba(0,0,0,.46);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}.now-popover{position:absolute;left:18px;right:18px;bottom:18px;max-height:72%;overflow:auto;border-radius:24px;padding:18px;background:rgba(38,35,32,.96);border:1px solid rgba(255,255,255,.16);box-shadow:0 20px 60px rgba(0,0,0,.38);color:#fff}.popover-title{font-size:22px;font-weight:800;margin-bottom:12px}.popover-section-title{font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.07em;color:rgba(255,255,255,.55);margin:2px 0 10px}
       .destination-list{display:flex;flex-direction:column;gap:5px}.destination-option{width:100%;min-height:48px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 28px;gap:10px;align-items:center;padding:8px 10px;text-align:left;font-size:16px;cursor:pointer}.destination-option.selected{background:rgba(255,255,255,.12)}.destination-option ha-icon{--mdc-icon-size:22px}.destination-activity{width:28px;height:22px}.playing-equalizer{width:28px;height:22px;display:flex;align-items:flex-end;justify-content:center;gap:3px}.playing-equalizer i{display:block;width:3px;height:7px;border-radius:999px;background:currentColor;transform-origin:center bottom;animation:familyMusicEq 760ms ease-in-out infinite alternate}.playing-equalizer i:nth-child(2){height:15px;animation-duration:560ms;animation-delay:-210ms}.playing-equalizer i:nth-child(3){height:10px;animation-duration:690ms;animation-delay:-390ms}@keyframes familyMusicEq{0%{transform:scaleY(.35);opacity:.55}100%{transform:scaleY(1);opacity:1}}@media(prefers-reduced-motion:reduce){.playing-equalizer i{animation:none}}
-      .balance-help{font-size:14px;line-height:1.35;color:rgba(255,255,255,.62);margin:-4px 0 14px}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr);gap:14px;align-items:center;min-height:58px}.member-balance-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-trim{width:100%;height:46px;margin:0;touch-action:pan-y;cursor:pointer}.balance-scale{display:grid;grid-template-columns:1fr 1fr 1fr;margin:1px 0 12px;padding-left:calc(110px + 14px);font-size:11px;color:rgba(255,255,255,.46)}.balance-scale span:nth-child(2){text-align:center}.balance-scale span:last-child{text-align:right}.balance-reset{display:block;width:100%;height:44px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;cursor:pointer}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
+      .balance-help{font-size:14px;line-height:1.35;color:rgba(255,255,255,.62);margin:-4px 0 14px}.dynamic-group-list{display:flex;flex-direction:column;gap:6px}.dynamic-group-option{width:100%;min-height:58px;border:0;border-radius:14px;background:transparent;color:#fff;display:grid;grid-template-columns:28px minmax(0,1fr) 72px;gap:10px;align-items:center;padding:9px 10px;text-align:left}.dynamic-group-option.joined{background:rgba(255,255,255,.06)}.dynamic-group-option.pending{background:rgba(255,255,255,.11)}.dynamic-group-option:disabled{opacity:1}.dynamic-group-mark{font-size:20px;text-align:center}.dynamic-group-option.pending .dynamic-group-mark{animation:familyMusicSpin .8s linear infinite}@keyframes familyMusicSpin{to{transform:rotate(360deg)}}.dynamic-group-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.dynamic-group-copy strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.dynamic-group-copy small{font-size:11px;color:rgba(255,255,255,.48)}.dynamic-group-status{font-size:11px;color:rgba(255,255,255,.62);font-weight:800;text-align:right}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-list{display:flex;flex-direction:column;gap:14px}.member-balance-row{display:grid;grid-template-columns:minmax(110px,1fr) minmax(150px,2fr);gap:14px;align-items:center;min-height:58px}.member-balance-name{font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.member-trim{width:100%;height:46px;margin:0;touch-action:pan-y;cursor:pointer}.balance-scale{display:grid;grid-template-columns:1fr 1fr 1fr;margin:1px 0 12px;padding-left:calc(110px + 14px);font-size:11px;color:rgba(255,255,255,.46)}.balance-scale span:nth-child(2){text-align:center}.balance-scale span:last-child{text-align:right}.balance-reset{display:block;width:100%;height:44px;border:1px solid rgba(255,255,255,.18);border-radius:14px;background:rgba(255,255,255,.08);color:#fff;font-weight:700;cursor:pointer}.menu-status{font-size:14px;color:rgba(255,255,255,.62);padding:4px 0 8px}
       .nav-strip{height:78px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;border-top:1px solid var(--divider-color);background:var(--card-background-color);flex:0 0 auto;padding:4px 8px 6px;gap:4px}
       .nav-button{min-width:0;width:100%;height:64px;border:0;border-radius:14px;background:transparent;color:var(--secondary-text-color);cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:0}
       .nav-button ha-icon{--mdc-icon-size:26px}.nav-button span{font-size:11px;font-weight:700;white-space:nowrap}.nav-button.active{color:var(--primary-color);background:color-mix(in srgb,var(--primary-color) 10%,transparent)}
