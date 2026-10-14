@@ -430,6 +430,193 @@ async def ws_player_peers(hass: HomeAssistant, connection, msg: dict) -> None:
     connection.send_result(msg["id"], peers)
 
 
+def _ma_sonos_group_context(
+    players: list[dict[str, Any]], player_id: str
+) -> dict[str, Any]:
+    """Resolve one physical Sonos player's current native grouping context."""
+    by_id = {
+        str(player.get("player_id")): player
+        for player in players
+        if isinstance(player, dict) and isinstance(player.get("player_id"), str)
+    }
+    selected = by_id.get(player_id)
+    if not selected:
+        raise ValueError("Selected player not found")
+    if selected.get("provider") != "sonos" or selected.get("type") == "group":
+        raise ValueError("Dynamic grouping is available only for physical Sonos speakers")
+    leader_id = str(selected.get("synced_to") or player_id)
+    leader = by_id.get(leader_id)
+    if not leader or leader.get("provider") != "sonos":
+        raise ValueError("Sonos group coordinator is unavailable")
+    member_ids = {leader_id}
+    for key in ("group_members", "group_childs"):
+        values = leader.get(key)
+        if isinstance(values, list):
+            member_ids.update(str(value) for value in values if isinstance(value, str))
+    return {
+        "selected": selected,
+        "leader": leader,
+        "leader_id": leader_id,
+        "member_ids": member_ids,
+        "by_id": by_id,
+        "can_group_with": {
+            str(value)
+            for value in (leader.get("can_group_with") or [])
+            if isinstance(value, str)
+        },
+    }
+
+
+def _ma_player_id_for_entity(registry, entity_id: str) -> str | None:
+    entry = registry.async_get(entity_id)
+    if (
+        entry is None
+        or entry.domain != "media_player"
+        or entry.platform != "music_assistant"
+        or not isinstance(entry.unique_id, str)
+    ):
+        return None
+    return entry.unique_id
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "family_music/group_topology",
+        vol.Required("config_entry_id"): str,
+        vol.Required("player_entity_id"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Return authoritative native Sonos membership for a physical MA player."""
+    registry = er.async_get(hass)
+    player_id = _ma_player_id_for_entity(registry, msg["player_entity_id"])
+    if not player_id:
+        connection.send_result(msg["id"], {"available": False, "speakers": []})
+        return
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    raw = await mass.send_command("players/all")
+    players = (
+        [player for player in raw if isinstance(player, dict)]
+        if isinstance(raw, list)
+        else []
+    )
+    try:
+        context = _ma_sonos_group_context(players, player_id)
+    except ValueError:
+        connection.send_result(msg["id"], {"available": False, "speakers": []})
+        return
+
+    ma_entity_by_unique_id = {
+        entry.unique_id: entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player"
+        and entry.platform == "music_assistant"
+        and isinstance(entry.unique_id, str)
+    }
+    native_entity_by_unique_id = {
+        entry.unique_id: entry.entity_id
+        for entry in registry.entities.values()
+        if entry.domain == "media_player"
+        and entry.platform == "sonos"
+        and isinstance(entry.unique_id, str)
+    }
+    speakers = []
+    for player in players:
+        candidate_id = player.get("player_id")
+        if (
+            not isinstance(candidate_id, str)
+            or player.get("provider") != "sonos"
+            or player.get("type") == "group"
+        ):
+            continue
+        entity_id = ma_entity_by_unique_id.get(candidate_id)
+        if not entity_id:
+            continue
+        state = hass.states.get(entity_id)
+        speakers.append(
+            {
+                "player_id": candidate_id,
+                "entity_id": entity_id,
+                "native_entity_id": native_entity_by_unique_id.get(candidate_id),
+                "name": (
+                    state.attributes.get("friendly_name")
+                    if state is not None
+                    else None
+                )
+                or player.get("name")
+                or entity_id,
+                "available": player.get("available") is not False,
+                "member": candidate_id in context["member_ids"],
+                "coordinator": candidate_id == context["leader_id"],
+            }
+        )
+    connection.send_result(
+        msg["id"],
+        {
+            "available": True,
+            "leader_id": context["leader_id"],
+            "speakers": speakers,
+        },
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "family_music/group_member",
+        vol.Required("config_entry_id"): str,
+        vol.Required("player_entity_id"): str,
+        vol.Required("member_player_id"): str,
+        vol.Required("action"): vol.In(("join", "leave")),
+    }
+)
+@websocket_api.async_response
+async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Join or leave one physical Sonos speaker through Music Assistant."""
+    registry = er.async_get(hass)
+    player_id = _ma_player_id_for_entity(registry, msg["player_entity_id"])
+    if not player_id:
+        connection.send_error(msg["id"], "invalid_player", "Selected player is not Music Assistant")
+        return
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    raw = await mass.send_command("players/all")
+    players = (
+        [player for player in raw if isinstance(player, dict)]
+        if isinstance(raw, list)
+        else []
+    )
+    try:
+        context = _ma_sonos_group_context(players, player_id)
+        member_id = msg["member_player_id"]
+        member = context["by_id"].get(member_id)
+        if not member or member.get("provider") != "sonos" or member.get("type") == "group":
+            raise ValueError("Group member must be a physical Sonos speaker")
+        if member.get("available") is False:
+            raise ValueError("Group member is unavailable")
+        if msg["action"] == "join":
+            if member_id not in context["member_ids"]:
+                if member_id not in context["can_group_with"]:
+                    raise ValueError("This speaker cannot join the selected Sonos group")
+                if member.get("synced_to") and member.get("synced_to") != context["leader_id"]:
+                    raise ValueError("Speaker is already participating in another Sonos group")
+                child_members = member.get("group_members") or member.get("group_childs") or []
+                if child_members:
+                    raise ValueError("Speaker is already coordinating another Sonos group")
+                await mass.send_command(
+                    "players/cmd/group_many",
+                    target_player=context["leader_id"],
+                    child_player_ids=[member_id],
+                )
+        elif member_id != context["leader_id"] and member_id in context["member_ids"]:
+            await mass.send_command("players/cmd/ungroup", player_id=member_id)
+        elif member_id == context["leader_id"]:
+            raise ValueError("The active Sonos coordinator cannot be removed here")
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_group_change", str(err))
+        return
+    connection.send_result(msg["id"], {"accepted": True})
+
+
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "family_music/recents",
@@ -622,6 +809,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register_command(hass, ws_search)
         websocket_api.async_register_command(hass, ws_group_members)
         websocket_api.async_register_command(hass, ws_player_peers)
+        websocket_api.async_register_command(hass, ws_group_topology)
+        websocket_api.async_register_command(hass, ws_group_member)
         websocket_api.async_register_command(hass, ws_recents)
         websocket_api.async_register_command(hass, ws_favorites)
         websocket_api.async_register_command(hass, ws_artist_albums)

@@ -146,6 +146,95 @@ def get_queues() -> list[dict[str, Any]]:
     return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
+def _sonos_group_context(
+    player_id: str, players: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Resolve authoritative native-Sonos membership for one physical player."""
+    players = get_players() if players is None else players
+    by_id = {
+        str(player.get("player_id")): player
+        for player in players
+        if isinstance(player.get("player_id"), str)
+    }
+    selected = by_id.get(player_id)
+    if not selected:
+        raise ValueError("Selected player not found")
+    if selected.get("provider") != "sonos" or selected.get("type") == "group":
+        raise ValueError("Dynamic grouping is available only for physical Sonos speakers")
+
+    leader_id = str(selected.get("synced_to") or player_id)
+    leader = by_id.get(leader_id)
+    if not leader or leader.get("provider") != "sonos":
+        raise ValueError("Sonos group coordinator is unavailable")
+
+    member_ids = {leader_id}
+    for key in ("group_members", "group_childs"):
+        values = leader.get(key)
+        if isinstance(values, list):
+            member_ids.update(str(value) for value in values if isinstance(value, str))
+
+    can_group_with = {
+        str(value)
+        for value in (leader.get("can_group_with") or [])
+        if isinstance(value, str)
+    }
+    physical = [
+        player
+        for player in players
+        if player.get("provider") == "sonos"
+        and player.get("type") != "group"
+        and isinstance(player.get("player_id"), str)
+    ]
+    return {
+        "leader_id": leader_id,
+        "leader": leader,
+        "selected": selected,
+        "member_ids": member_ids,
+        "can_group_with": can_group_with,
+        "players": physical,
+        "by_id": by_id,
+    }
+
+
+def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str, Any]:
+    """Join/leave a physical Sonos member using Music Assistant native grouping."""
+    context = _sonos_group_context(player_id)
+    leader_id = context["leader_id"]
+    member_ids = context["member_ids"]
+    member = context["by_id"].get(member_id)
+    if not member or member.get("provider") != "sonos" or member.get("type") == "group":
+        raise ValueError("Group member must be a physical Sonos speaker")
+    if member.get("available") is False:
+        raise ValueError("Group member is unavailable")
+
+    if action == "join":
+        if member_id in member_ids:
+            return {"accepted": True, "already_member": True, "leader_id": leader_id}
+        if member_id not in context["can_group_with"]:
+            raise ValueError("This speaker cannot join the selected Sonos group")
+        if member.get("synced_to") and member.get("synced_to") != leader_id:
+            raise ValueError("Speaker is already participating in another Sonos group")
+        child_members = member.get("group_members") or member.get("group_childs") or []
+        if child_members:
+            raise ValueError("Speaker is already coordinating another Sonos group")
+        result = client.command(
+            "players/cmd/group_many",
+            target_player=leader_id,
+            child_player_ids=[member_id],
+        )
+        return {"accepted": True, "leader_id": leader_id, "result": result}
+
+    if action == "leave":
+        if member_id == leader_id:
+            raise ValueError("The active Sonos coordinator cannot be removed here")
+        if member_id not in member_ids:
+            return {"accepted": True, "already_removed": True, "leader_id": leader_id}
+        result = client.command("players/cmd/ungroup", player_id=member_id)
+        return {"accepted": True, "leader_id": leader_id, "result": result}
+
+    raise ValueError("Invalid group action")
+
+
 
 def _name_tokens(value: str) -> set[str]:
     import re
@@ -745,6 +834,19 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     result = client.command(command, queue_id=queue_id)
                 self._send_json({"ok": True, "result": result})
+                return
+            if path == "/api/group-member":
+                player_id = str(body.get("player_id") or "")
+                member_id = str(body.get("member_id") or "")
+                action = str(body.get("action") or "")
+                if not player_id or not member_id:
+                    self._send_json(
+                        {"error": "player_id and member_id are required"},
+                        HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                result = change_sonos_group(player_id, member_id, action)
+                self._send_json({"ok": True, **result})
                 return
             if path == "/api/native-mode-control":
                 queue_id = str(body.get("queue_id") or "")
