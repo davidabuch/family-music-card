@@ -496,7 +496,11 @@ async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
         return
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     raw = await mass.send_command("players/all")
-    players = [player for player in raw if isinstance(player, dict)] if isinstance(raw, list) else []
+    players = (
+        [player for player in raw if isinstance(player, dict)]
+        if isinstance(raw, list)
+        else []
+    )
     try:
         context = _ma_sonos_group_context(players, player_id)
     except ValueError:
@@ -576,7 +580,11 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
         return
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     raw = await mass.send_command("players/all")
-    players = [player for player in raw if isinstance(player, dict)] if isinstance(raw, list) else []
+    players = (
+        [player for player in raw if isinstance(player, dict)]
+        if isinstance(raw, list)
+        else []
+    )
     try:
         context = _ma_sonos_group_context(players, player_id)
         member_id = msg["member_player_id"]
