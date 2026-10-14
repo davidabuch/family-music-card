@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.13"
+    assert manifest["version"] == "0.3.14"
     assert card_path.exists()
 
 
@@ -345,17 +345,20 @@ def test_search_music_button_uses_clean_red_search_icon():
     assert 'music-search-capsule' not in search_button
 
 
-def test_group_speaker_button_replaces_three_dots_and_disables_for_single_zone():
+def test_group_speaker_button_supports_balance_and_dynamic_grouping():
     card_text = (
         ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     ).read_text()
     assert 'class="bottom-circle group-speakers-button"' in card_text
     assert 'icon="mdi:speaker-multiple"' in card_text
     assert 'icon="mdi:dots-horizontal"' not in card_text
-    assert 'if (!this._isSelectedGroup()) return;' in card_text
-    assert 'moreButton.disabled = !grouped' in card_text
-    assert 'Single speaker — no group controls' in card_text
-    assert '.group-speakers-button:disabled' in card_text
+    assert 'moreButton.title = grouped ? "Speaker balance" : "Group speakers"' in card_text
+    assert 'family_music/group_topology' in (
+        ROOT / "custom_components" / "family_music" / "__init__.py"
+    ).read_text()
+    assert "Group Speakers" in card_text
+    assert "Joining…" in card_text
+    assert "Leaving…" in card_text
 
 
 
@@ -485,3 +488,21 @@ def test_physical_sonos_skip_uses_native_peer_with_immediate_feedback():
     assert 'button?.classList.add("accepted")' in card_text
     assert 'button?.setAttribute("aria-busy", "true")' in card_text
     assert '.transport-button.accepted' in card_text
+
+
+def test_ha_card_dynamic_grouping_uses_same_music_assistant_commands():
+    init_text = (ROOT / "custom_components" / "family_music" / "__init__.py").read_text()
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+    assert '"family_music/group_topology"' in init_text
+    assert '"family_music/group_member"' in init_text
+    assert '"players/cmd/group_many"' in init_text
+    assert '"players/cmd/ungroup"' in init_text
+    assert 'target_player=context["leader_id"]' in init_text
+    assert "child_player_ids=[member_id]" in init_text
+    assert "Speaker is already participating in another Sonos group" in init_text
+    assert "Dynamic grouping is available only for physical Sonos speakers" in init_text
+    assert 'this._ws("family_music/group_member"' in card_text
+    assert 'this._ws("family_music/group_topology"' in card_text
+    assert "this._pendingGroupChange" in card_text
