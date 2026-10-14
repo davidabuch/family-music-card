@@ -1,17 +1,3 @@
-## 0.2.30
-
-- Preserve the original Music Assistant Sonos Cloud Queue ownership during native coordinator handoff so Next and automatic track advance continue to use the live session's existing callback endpoint.
-- Delegate Sonos coordination with the former coordinator temporarily rejoining the group, then remove it as an ordinary child after Music Assistant observes the new coordinator.
-- Eliminate the MA leader queue-transfer/stop/resume step from the native handoff path.
-- Keep the proven Music Assistant leadership-transfer path as fallback if native Sonos delegation cannot be established.
-
-## 0.2.29
-
-- Prefer Sonos native coordinator delegation when removing the currently playing coordinator, so the surviving group keeps its live Sonos session instead of relying on Music Assistant's stop/resume leadership transfer.
-- After Sonos confirms the new coordinator, move Music Assistant queue bookkeeping to the survivor with auto-play disabled.
-- Retain the proven Music Assistant coordinator-transfer path as a safe fallback if native Sonos delegation is unavailable or rejected.
-- Ordinary non-coordinator speaker removal is unchanged.
-
 ## 0.2.28
 
 - Keep the Group Speakers popup live after join/remove commands by polling authoritative Music Assistant topology until the requested membership change is visible.
