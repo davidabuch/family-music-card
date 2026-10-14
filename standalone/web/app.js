@@ -14,6 +14,8 @@ const state = {
   nativeModesFetchedAt: 0,
   destinationOpen: false,
   balanceOpen: false,
+  groupOpen: false,
+  pendingGroup: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -59,6 +61,27 @@ function queueId() {
 
 function playerName(player) {
   return player?.name || player?.display_name || player?.player_id || "Speaker";
+}
+
+function isPhysicalSonos(player) {
+  return Boolean(player?.provider === "sonos" && player?.type !== "group" &&
+    String(player?.player_id || "").startsWith("RINCON_"));
+}
+
+function sonosGroupContext(player = selectedPlayer()) {
+  if (!isPhysicalSonos(player)) return null;
+  const leaderId = player.synced_to || player.player_id;
+  const leader = state.players.find((item) => item.player_id === leaderId) || player;
+  const memberIds = new Set([leaderId]);
+  for (const key of ["group_members", "group_childs"]) {
+    const values = Array.isArray(leader?.[key]) ? leader[key] : [];
+    values.forEach((value) => memberIds.add(value));
+  }
+  return {leaderId, leader, memberIds};
+}
+
+function authoritativeGroupMembership(memberId, player = selectedPlayer()) {
+  return Boolean(sonosGroupContext(player)?.memberIds.has(memberId));
 }
 
 function mediaName(item) {
@@ -334,6 +357,7 @@ async function refreshState() {
     }
     renderNow();
     updateDestinationActivity();
+    updateGroupOverlay();
     void refreshNativeModes();
   } catch (error) {
     showToast(error.message, 3000);
@@ -609,6 +633,7 @@ function nudgeVolume(delta) {
 function closeOverlay() {
   state.destinationOpen = false;
   state.balanceOpen = false;
+  state.groupOpen = false;
   $("#overlay").classList.remove("open");
   $("#overlay").innerHTML = "";
   $(".tabbar")?.classList.remove("overlay-hidden");
@@ -629,6 +654,97 @@ function renderDestinationOverlay() {
     localStorage.setItem("family-music-player-id", state.selectedPlayerId);
     closeOverlay(); renderNow();
   }));
+}
+
+function groupButtonState(memberId) {
+  const context = sonosGroupContext();
+  const pending = state.pendingGroup?.memberId === memberId ? state.pendingGroup : null;
+  const member = context?.memberIds.has(memberId) || false;
+  if (pending && Date.now() < pending.expiresAt) {
+    return {
+      checked: pending.action === "join",
+      pending: true,
+      label: pending.action === "join" ? "Joining…" : "Leaving…",
+    };
+  }
+  return {checked: member, pending: false, label: member ? "Joined" : "Add"};
+}
+
+function updateGroupOverlay() {
+  if (!state.groupOpen) return;
+  const context = sonosGroupContext();
+  if (!context) {
+    closeOverlay();
+    return;
+  }
+  const pending = state.pendingGroup;
+  if (pending) {
+    const confirmed = authoritativeGroupMembership(pending.memberId) === (pending.action === "join");
+    if (confirmed || Date.now() >= pending.expiresAt) {
+      if (!confirmed) showToast("Sonos group change was not confirmed", 3000);
+      state.pendingGroup = null;
+    }
+  }
+  document.querySelectorAll(".group-speaker-option[data-member]").forEach((button) => {
+    const memberId = button.dataset.member;
+    const current = groupButtonState(memberId);
+    button.classList.toggle("joined", current.checked);
+    button.classList.toggle("pending", current.pending);
+    button.setAttribute("aria-pressed", String(current.checked));
+    button.setAttribute("aria-busy", String(current.pending));
+    const mark = button.querySelector(".group-speaker-mark");
+    const status = button.querySelector(".group-speaker-status");
+    if (mark) mark.textContent = current.pending ? "◌" : current.checked ? "✓" : "○";
+    if (status) status.textContent = current.label;
+  });
+}
+
+async function toggleGroupMember(memberId) {
+  const player = selectedPlayer();
+  const context = sonosGroupContext(player);
+  if (!player || !context || state.pendingGroup) return;
+  if (memberId === context.leaderId) return;
+  const action = context.memberIds.has(memberId) ? "leave" : "join";
+  state.pendingGroup = {memberId, action, expiresAt: Date.now() + 7000};
+  updateGroupOverlay();
+  try {
+    await api("/api/group-member", {
+      method: "POST",
+      body: JSON.stringify({player_id: player.player_id, member_id: memberId, action}),
+    });
+    await refreshState();
+  } catch (error) {
+    state.pendingGroup = null;
+    updateGroupOverlay();
+    showToast(error.message, 3500);
+  }
+}
+
+function renderGroupOverlay() {
+  const player = selectedPlayer();
+  const context = sonosGroupContext(player);
+  if (!context) {
+    renderBalanceOverlay();
+    return;
+  }
+  state.groupOpen = true; state.destinationOpen = false; state.balanceOpen = false;
+  const speakers = state.players.filter((item) => isPhysicalSonos(item));
+  const rows = speakers.map((member) => {
+    const current = groupButtonState(member.player_id);
+    const coordinator = member.player_id === context.leaderId;
+    return `<button class="group-speaker-option ${current.checked?"joined":""}" data-member="${escapeHtml(member.player_id)}" aria-pressed="${current.checked}" ${coordinator?"disabled":""}>
+      <span class="group-speaker-mark">${current.checked?"✓":"○"}</span>
+      <span class="group-speaker-copy"><strong>${escapeHtml(playerName(member))}</strong><small>${coordinator?"Current playback":"Tap to "+(current.checked?"remove":"add")}</small></span>
+      <span class="group-speaker-status">${coordinator?"Playing":current.label}</span>
+    </button>`;
+  }).join("");
+  $("#overlay").classList.add("open");
+  $(".tabbar")?.classList.add("overlay-hidden");
+  $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Group Speakers</h3><div class="group-help">Add a speaker to this Sonos session. Playback stays synchronized.</div><div class="group-speaker-list">${rows}</div></div>`;
+  $(".scrim").addEventListener("click", closeOverlay);
+  document.querySelectorAll(".group-speaker-option[data-member]").forEach((button) => {
+    if (!button.disabled) button.addEventListener("click", () => toggleGroupMember(button.dataset.member));
+  });
 }
 
 function renderBalanceOverlay() {
@@ -728,7 +844,7 @@ function wire() {
   $("#searchInput").addEventListener("keydown",(event)=>{if(event.key==="Enter")runSearch();});
   $("#openSearch").addEventListener("click",()=>setView("search"));
   $("#destination").addEventListener("click",renderDestinationOverlay);
-  $("#more").addEventListener("click",renderBalanceOverlay);
+  $("#more").addEventListener("click",()=>isPhysicalSonos(selectedPlayer())?renderGroupOverlay():renderBalanceOverlay);
   $("#previous").addEventListener("click",(event)=>transport("previous",event.currentTarget));
   $("#next").addEventListener("click",(event)=>transport("next",event.currentTarget));
   $("#playPause").addEventListener("click",(event)=>transport(selectedPlayer()?.state==="playing"?"pause":"play",event.currentTarget));
