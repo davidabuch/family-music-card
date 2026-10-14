@@ -559,3 +559,121 @@ def test_native_sonos_artwork_resolved_server_side():
     with mock.patch.object(module, "search", return_value={"tracks": tracks}):
         module.resolve_sonos_artwork(players)
     assert players[0]["current_media"]["image_url"] == "https://example.com/art.jpg"
+
+
+def test_dynamic_sonos_grouping_uses_music_assistant_native_group_commands(monkeypatch):
+    calls = []
+    players = [
+        {
+            "player_id": "RINCON_KITCHEN",
+            "name": "Kitchen",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "synced_to": None,
+            "group_members": [],
+            "group_childs": [],
+            "can_group_with": ["RINCON_BEDROOM"],
+        },
+        {
+            "player_id": "RINCON_BEDROOM",
+            "name": "Bedroom",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "synced_to": None,
+            "group_members": [],
+            "group_childs": [],
+            "can_group_with": ["RINCON_KITCHEN"],
+        },
+    ]
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: calls.append((command, kwargs)) or None,
+    )
+
+    result = standalone.change_sonos_group(
+        "RINCON_KITCHEN", "RINCON_BEDROOM", "join"
+    )
+
+    assert result["accepted"] is True
+    assert calls == [(
+        "players/cmd/group_many",
+        {
+            "target_player": "RINCON_KITCHEN",
+            "child_player_ids": ["RINCON_BEDROOM"],
+        },
+    )]
+
+
+def test_dynamic_sonos_grouping_removes_only_requested_member(monkeypatch):
+    calls = []
+    players = [
+        {
+            "player_id": "RINCON_KITCHEN",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "group_members": ["RINCON_KITCHEN", "RINCON_BEDROOM"],
+            "group_childs": ["RINCON_BEDROOM"],
+            "can_group_with": ["RINCON_BEDROOM"],
+        },
+        {
+            "player_id": "RINCON_BEDROOM",
+            "provider": "sonos",
+            "type": "player",
+            "available": True,
+            "synced_to": "RINCON_KITCHEN",
+            "group_members": [],
+            "group_childs": [],
+        },
+    ]
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: calls.append((command, kwargs)) or None,
+    )
+
+    result = standalone.change_sonos_group(
+        "RINCON_KITCHEN", "RINCON_BEDROOM", "leave"
+    )
+
+    assert result["accepted"] is True
+    assert calls == [("players/cmd/ungroup", {"player_id": "RINCON_BEDROOM"})]
+
+
+def test_dynamic_sonos_grouping_refuses_preset_group_mutation(monkeypatch):
+    monkeypatch.setattr(
+        standalone,
+        "get_players",
+        lambda: [{
+            "player_id": "syncgroup_main",
+            "provider": "sync_group",
+            "type": "group",
+            "available": True,
+            "group_members": ["RINCON_KITCHEN"],
+        }],
+    )
+    import pytest
+
+    with pytest.raises(ValueError, match="physical Sonos"):
+        standalone.change_sonos_group(
+            "syncgroup_main", "RINCON_BEDROOM", "join"
+        )
+
+
+def test_dynamic_grouping_ui_is_optimistic_but_waits_for_authoritative_state():
+    js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    css = (ROOT / "standalone" / "web" / "styles.css").read_text()
+
+    assert '"/api/group-member"' in js
+    assert "Group Speakers" in js
+    assert "Joining…" in js
+    assert "Leaving…" in js
+    assert "authoritativeGroupMembership" in js
+    assert "Sonos group change was not confirmed" in js
+    assert 'provider === "sonos"' in js
+    assert ".group-speaker-option.pending" in css
