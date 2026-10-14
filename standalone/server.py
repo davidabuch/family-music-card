@@ -227,7 +227,7 @@ def _delegate_sonos_coordinator(
     <u:DelegateGroupCoordinationTo xmlns:u="urn:schemas-upnp-org:service:AVTransport:1">
       <InstanceID>0</InstanceID>
       <NewCoordinator>{successor_id}</NewCoordinator>
-      <RejoinGroup>0</RejoinGroup>
+      <RejoinGroup>1</RejoinGroup>
     </u:DelegateGroupCoordinationTo>
   </s:Body>
 </s:Envelope>""".encode()
@@ -248,9 +248,9 @@ def _delegate_sonos_coordinator(
 
 
 def _wait_for_sonos_successor(
-    successor_id: str, old_leader_id: str, attempts: int = 12
+    successor_id: str, attempts: int = 12
 ) -> list[dict[str, Any]]:
-    """Wait briefly for Music Assistant to observe native Sonos coordinator handoff."""
+    """Wait briefly for MA to observe the delegated Sonos coordinator."""
     latest: list[dict[str, Any]] = []
     for _ in range(attempts):
         latest = get_players()
@@ -258,31 +258,27 @@ def _wait_for_sonos_successor(
             context = _sonos_group_context(successor_id, latest)
         except ValueError:
             context = None
-        if (
-            context
-            and context["leader_id"] == successor_id
-            and old_leader_id not in context["member_ids"]
-        ):
+        if context and context["leader_id"] == successor_id:
             return latest
         time.sleep(0.15)
     raise RuntimeError("Native Sonos coordinator handoff was not confirmed")
 
 
-def _transfer_ma_queue_without_resume(source_id: str, target_id: str) -> None:
-    """Move MA queue bookkeeping after Sonos already handed off live playback."""
-    queues = get_queues()
-    source = next((q for q in queues if q.get("queue_id") == source_id), None)
-    if not source:
-        return
-    active = bool(source.get("active")) or source.get("state") not in (None, "idle")
-    if not active:
-        return
-    client.command(
-        "player_queues/transfer",
-        source_queue_id=source_id,
-        target_queue_id=target_id,
-        auto_play=False,
-    )
+def _wait_for_sonos_departure(
+    successor_id: str, departing_id: str, attempts: int = 12
+) -> list[dict[str, Any]]:
+    """Wait for the former coordinator to leave the delegated Sonos group."""
+    latest: list[dict[str, Any]] = []
+    for _ in range(attempts):
+        latest = get_players()
+        try:
+            context = _sonos_group_context(successor_id, latest)
+        except ValueError:
+            context = None
+        if context and departing_id not in context["member_ids"]:
+            return latest
+        time.sleep(0.15)
+    raise RuntimeError("Former Sonos coordinator did not leave the group")
 
 
 def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str, Any]:
@@ -351,14 +347,21 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
                 "result": result,
             }
 
-        _wait_for_sonos_successor(successor_id, leader_id)
-        _transfer_ma_queue_without_resume(leader_id, successor_id)
+        # Keep the former coordinator in the group during delegation so Sonos
+        # can transfer the live session without reloading it. Once MA observes
+        # the new coordinator, remove the former coordinator as an ordinary
+        # child. This avoids MA's leader queue-transfer/stop/resume path and
+        # preserves the original Sonos Cloud Queue endpoint for future tracks.
+        _wait_for_sonos_successor(successor_id)
+        result = client.command("players/cmd/ungroup", player_id=leader_id)
+        _wait_for_sonos_departure(successor_id, leader_id)
         return {
             "accepted": True,
             "leader_id": successor_id,
             "selected_player_id": successor_id,
+            "session_queue_id": leader_id,
             "handoff": "native_sonos_delegate",
-            "result": None,
+            "result": result,
         }
 
     raise ValueError("Invalid group action")
