@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.15";
+const CARD_VERSION = "0.3.16";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -301,6 +301,24 @@ class FamilyMusicCard extends HTMLElement {
     `;
   }
 
+  async _waitForDynamicGroupConfirmation(memberPlayerId, action) {
+    const expected = action === "join";
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      this._groupTopologyFor = null;
+      await this._loadGroupTopology(true);
+      const member = this._groupTopology?.speakers?.find(
+        (item) => item.player_id === memberPlayerId
+      );
+      if (Boolean(member?.member) === expected) {
+        this._pendingGroupChange = null;
+        this._renderNowOverlays();
+        return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+    }
+    return false;
+  }
+
   async _toggleDynamicGroupMember(memberPlayerId) {
     if (!memberPlayerId || !this._selectedPlayer || this._pendingGroupChange) return;
     const speaker = this._groupTopology?.speakers?.find(
@@ -326,8 +344,14 @@ class FamilyMusicCard extends HTMLElement {
         this._selectedPlayer = result.selected_player_entity_id;
         localStorage.setItem("family-music-card-player", this._selectedPlayer);
       }
-      this._groupTopologyFor = null;
-      await this._loadGroupTopology(true);
+      const confirmed = await this._waitForDynamicGroupConfirmation(
+        memberPlayerId,
+        action
+      );
+      if (!confirmed) {
+        this._pendingGroupChange = null;
+        this._renderNowOverlays();
+      }
     } catch (_error) {
       this._pendingGroupChange = null;
       this._renderNowOverlays();
