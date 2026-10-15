@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Family Music">
   <title>Family Music</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=0.2.33">
+  <link rel="stylesheet" href="/styles.css?v=0.2.34">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/approved-v2/icon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/icons/approved-v2/icon-16.png"><link rel="shortcut icon" href="/favicon.ico"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=approved-v2"><link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=approved-v2"></head>
 <body>
   <main id="app" class="app-shell">
@@ -32,13 +32,13 @@
           <button id="shuffle" class="mode-button" aria-label="Shuffle off" title="Shuffle off" type="button">⤨</button>
         </div>
         <div class="volume-row">
-          <button id="mute" class="icon-button" type="button" aria-label="Mute" aria-pressed="false">🔊</button>
           <button id="volumeDown" class="nudge" aria-label="Volume down">−</button>
           <input id="volume" type="range" min="0" max="100" step="1" value="20" aria-label="Volume">
           <span id="volumeValue">20</span>
           <button id="volumeUp" class="nudge" aria-label="Volume up">＋</button>
         </div>
         <div class="bottom-actions">
+          <button id="mute" class="mute-bottom-circle" type="button" aria-label="Mute" aria-pressed="false">🔊</button>
           <button id="openSearch" class="search-circle" aria-label="Search music">⌕</button>
           <button id="destination" class="destination-pill" aria-label="Choose playback destination"><span class="speaker-icon"><svg class="speaker-group-icon" viewBox="0 0 28 24" aria-hidden="true" focusable="false">
   <rect x="2.5" y="6.5" width="12" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/>
@@ -72,6 +72,6 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
-  <script src="/app.js?v=0.2.33" defer></script>
+  <script src="/app.js?v=0.2.34" defer></script>
 </body>
 </html>
