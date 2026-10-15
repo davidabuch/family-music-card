@@ -108,7 +108,7 @@ def test_refined_progress_and_compact_volume_controls():
     assert 'id="trackProgress" class="track-progress" type="range"' in card_text
     assert "--progress-pct" in card_text
     assert 'class="volume-nudge"' in card_text
-    assert "grid-template-columns:38px 32px minmax(0,1fr) 34px 32px" in card_text
+    assert "grid-template-columns:32px minmax(0,1fr) 34px 32px" in card_text
 
 
 def test_sonos_inspired_now_playing_and_seekable_progress():
