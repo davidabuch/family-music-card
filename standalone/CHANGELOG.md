@@ -1,3 +1,10 @@
+## 0.2.34
+
+- Move Mute out of the volume row so Volume Down is no longer adjacent to the mute target.
+- Bottom action row is now Mute, Search, Destination, Speaker/Group.
+- Slightly narrow the destination tile to make room while keeping the active room name visible.
+- UI-only release; no Music Assistant, queue, grouping, or Sonos authority behavior changes.
+
 ## 0.2.33
 
 - Replace the ambiguous square beside the current destination with a two-overlapping-speakers icon.
