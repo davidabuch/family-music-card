@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.16";
+const CARD_VERSION = "0.3.21";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -894,12 +894,12 @@ class FamilyMusicCard extends HTMLElement {
                 </svg>
               </button>
               <button id="destinationButton" class="destination-pill" title="Change playback destination">
-                <ha-icon icon="mdi:speaker"></ha-icon>
+                <ha-icon icon="mdi:speaker-multiple"></ha-icon>
                 <span id="destinationName">${this._escape(playerName)}</span>
                 <ha-icon class="destination-chevron" icon="mdi:chevron-up"></ha-icon>
               </button>
               <button id="moreButton" class="bottom-circle group-speakers-button" title="Group speaker controls" aria-label="Group speaker controls">
-                <ha-icon icon="mdi:speaker-multiple"></ha-icon>
+                <ha-icon icon="mdi:speaker"></ha-icon>
               </button>
             </div>
           </div>

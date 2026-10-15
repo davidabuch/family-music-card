@@ -1,3 +1,9 @@
+## 0.2.33
+
+- Replace the ambiguous square beside the current destination with a two-overlapping-speakers icon.
+- Replace the ambiguous square group-control button with a single-speaker icon.
+- UI-only release from the known-good 0.2.28 playback/grouping baseline; no Music Assistant, queue, or Sonos authority behavior changes.
+
 ## 0.2.28
 
 - Keep the Group Speakers popup live after join/remove commands by polling authoritative Music Assistant topology until the requested membership change is visible.
