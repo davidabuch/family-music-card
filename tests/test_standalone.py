@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.33"' in app_config
+    assert 'version: "0.2.34"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -771,3 +771,16 @@ def test_now_playing_uses_descriptive_speaker_icons():
     assert 'aria-label="Group speakers"' in index
     assert '<span class="speaker-icon">▣</span>' not in index
     assert 'aria-label="Speaker balance">▣</button>' not in index
+
+
+def test_mute_moves_out_of_volume_row_into_bottom_actions():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+    styles = (ROOT / "standalone" / "web" / "styles.css").read_text()
+
+    volume = index.split('<div class="volume-row">', 1)[1].split("</div>", 1)[0]
+    bottom = index.split('<div class="bottom-actions">', 1)[1].split("</div>", 1)[0]
+    assert 'id="mute"' not in volume
+    assert bottom.index('id="mute"') < bottom.index('id="openSearch"')
+    assert bottom.index('id="openSearch"') < bottom.index('id="destination"')
+    assert bottom.index('id="destination"') < bottom.index('id="more"')
+    assert "grid-template-columns:46px 46px minmax(0,1fr) 46px" in styles
