@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.21"
+    assert manifest["version"] == "0.3.22"
     assert card_path.exists()
 
 
@@ -545,3 +545,17 @@ def test_now_playing_speaker_icons_match_standalone_semantics():
     more = card_text.split('id="moreButton"', 1)[1].split("</button>", 1)[0]
     assert 'icon="mdi:speaker-multiple"' in destination
     assert 'icon="mdi:speaker"' in more
+
+
+def test_ha_card_mute_moves_out_of_volume_row_into_bottom_actions():
+    card_text = (
+        ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
+    ).read_text()
+
+    volume = card_text.split('<div class="volume-row">', 1)[1].split("</div>", 1)[0]
+    bottom = card_text.split('<div class="bottom-actions">', 1)[1].split("</div>", 1)[0]
+    assert 'id="muteToggle"' not in volume
+    assert bottom.index('id="muteToggle"') < bottom.index('id="openSearch"')
+    assert bottom.index('id="openSearch"') < bottom.index('id="destinationButton"')
+    assert bottom.index('id="destinationButton"') < bottom.index('id="moreButton"')
+    assert "grid-template-columns:52px 52px minmax(0,1fr) 52px" in card_text
