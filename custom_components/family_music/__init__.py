@@ -334,7 +334,9 @@ async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
 @websocket_api.async_response
 async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return Home Assistant media_player entities for one Music Assistant group."""
-    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=False):\n        return\n    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=False):
+        return
+    mass = get_music_assistant_client(hass, msg["config_entry_id"])
     registry = er.async_get(hass)
     group_entry = registry.async_get(msg["player_entity_id"])
     group_player_id = (
@@ -515,7 +517,9 @@ def _ma_player_id_for_entity(registry, entity_id: str) -> str | None:
 @websocket_api.async_response
 async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return authoritative native Sonos membership for a physical MA player."""
-    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=False):\n        return\n    registry = er.async_get(hass)
+    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=False):
+        return
+    registry = er.async_get(hass)
     player_id = _ma_player_id_for_entity(registry, msg["player_entity_id"])
     if not player_id:
         connection.send_result(msg["id"], {"available": False, "speakers": []})
@@ -602,7 +606,9 @@ async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
 @websocket_api.async_response
 async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
     """Join or leave one physical Sonos speaker through Music Assistant."""
-    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=True):\n        return\n    registry = er.async_get(hass)
+    if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=True):
+        return
+    registry = er.async_get(hass)
     player_id = _ma_player_id_for_entity(registry, msg["player_entity_id"])
     if not player_id:
         connection.send_error(msg["id"], "invalid_player", "Selected player is not Music Assistant")
