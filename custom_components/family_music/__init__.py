@@ -285,7 +285,9 @@ def _entity_allowed(connection, entity_id: str, *, control: bool = False) -> boo
     return permissions.check_entity(entity_id, policy)
 
 
-def _require_entity_permission(connection, msg: dict, entity_id: str, *, control: bool = False) -> bool:
+def _require_entity_permission(
+    connection, msg: dict, entity_id: str, *, control: bool = False
+) -> bool:
     if _entity_allowed(connection, entity_id, control=control):
         return True
     connection.send_error(msg["id"], "unauthorized", "Permission denied for this media player")
@@ -525,7 +527,9 @@ async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
         connection.send_result(msg["id"], {"available": False, "speakers": []})
         return
     member_entity = _ma_entity_for_player(registry, msg["member_player_id"])
-    if not member_entity or not _require_entity_permission(connection, msg, member_entity, control=True):
+    if not member_entity or not _require_entity_permission(
+        connection, msg, member_entity, control=True
+    ):
         return
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     raw = await mass.send_command("players/all")
@@ -614,7 +618,9 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
         connection.send_error(msg["id"], "invalid_player", "Selected player is not Music Assistant")
         return
     member_entity = _ma_entity_for_player(registry, msg["member_player_id"])
-    if not member_entity or not _require_entity_permission(connection, msg, member_entity, control=True):
+    if not member_entity or not _require_entity_permission(
+        connection, msg, member_entity, control=True
+    ):
         return
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     raw = await mass.send_command("players/all")
