@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.35"' in app_config
+    assert 'version: "0.2.36"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -836,3 +836,64 @@ def test_sonos_artwork_fallback_is_cached_outside_hot_state_poll():
     assert "state.artworkFallbackCache.get(cacheKey)" in app_js
     assert "state.artworkFallbackCache.set(cacheKey, lookup)" in app_js
     assert "state.artworkFallbackCache.size > 100" in app_js
+
+
+def test_queue_and_mutation_scope_enforce_player_allowlist(monkeypatch):
+    players = [
+        {"player_id": "allowed", "active_source": "allowed_queue", "name": "Allowed"},
+    ]
+    monkeypatch.setattr(standalone, "PLAYER_ALLOWLIST", {"allowed"})
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(
+        standalone.client,
+        "command",
+        lambda command, **kwargs: [
+            {"queue_id": "allowed_queue"},
+            {"queue_id": "excluded_queue"},
+        ] if command == "player_queues/all" else [],
+    )
+
+    assert standalone.get_queues(players) == [{"queue_id": "allowed_queue"}]
+    standalone._require_allowed_destination("allowed")
+    standalone._require_allowed_destination("allowed_queue")
+
+    import pytest
+
+    with pytest.raises(standalone.AuthorizationError):
+        standalone._require_allowed_destination("excluded")
+
+
+def test_write_requests_require_json_and_reject_foreign_origin():
+    handler = object.__new__(standalone.Handler)
+    responses = []
+    handler._send_json = lambda value, status=200: responses.append((value, status))
+
+    handler.headers = {"Content-Type": "text/plain", "Host": "family.local:8099"}
+    assert handler._validate_write_request() is False
+    assert responses[-1][1] == 415
+
+    handler.headers = {
+        "Content-Type": "application/json",
+        "Host": "family.local:8099",
+        "Origin": "https://evil.example",
+    }
+    assert handler._validate_write_request() is False
+    assert responses[-1][1] == 403
+
+    handler.headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Host": "family.local:8099",
+        "Origin": "http://family.local:8099",
+    }
+    assert handler._validate_write_request() is True
+
+    handler.headers = {"Content-Type": "application/json", "Host": "family.local:8099"}
+    assert handler._validate_write_request() is True
+
+
+def test_state_filters_queues_when_allowlist_is_configured():
+    server_text = SERVER_PATH.read_text()
+    state_block = server_text.split('if path == "/api/state":', 1)[1].split(
+        'if path == "/api/native-modes":', 1
+    )[0]
+    assert "get_queues(players)" in state_block
