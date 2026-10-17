@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import secrets
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -24,6 +25,12 @@ WEB_ROOT = ROOT / "web"
 MA_URL = os.environ.get("MA_URL", "http://127.0.0.1:8095").rstrip("/")
 MA_TOKEN = os.environ.get("MA_TOKEN", "")
 PORT = int(os.environ.get("PORT", "8099"))
+MAX_JSON_BODY_BYTES = 64 * 1024
+MAX_MA_RESPONSE_BYTES = 8 * 1024 * 1024
+REQUEST_TIMEOUT_SECONDS = 15
+MAX_CONCURRENT_REQUESTS = 6
+API_REQUEST_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+
 PLAYER_ALLOWLIST = {
     item.strip()
     for item in os.environ.get("FAMILY_MUSIC_PLAYER_IDS", "").split(",")
@@ -67,7 +74,9 @@ class MAClient:
         )
         try:
             with urllib.request.urlopen(request, timeout=12) as response:
-                raw = response.read()
+                raw = response.read(MAX_MA_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_MA_RESPONSE_BYTES:
+                    raise MAError("Music Assistant response exceeded safety limit")
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")
             raise MAError(f"Music Assistant HTTP {err.code}: {detail}") from err
@@ -660,6 +669,10 @@ def resolve_sonos_artwork(players: list[dict[str, Any]]) -> None:
 class Handler(BaseHTTPRequestHandler):
     server_version = "FamilyMusic/0.1"
 
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(REQUEST_TIMEOUT_SECONDS)
+
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"[family-music] {self.address_string()} - {fmt % args}", flush=True)
 
@@ -747,17 +760,43 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError) as err:
+            raise ValueError("Invalid Content-Length") from err
+        if length < 0:
+            raise ValueError("Invalid Content-Length")
+        if length > MAX_JSON_BODY_BYTES:
+            raise ValueError("JSON body exceeds 64 KiB safety limit")
         raw = self.rfile.read(length) if length else b"{}"
+        if length and len(raw) != length:
+            raise ValueError("Incomplete request body")
         data = json.loads(raw or b"{}")
         if not isinstance(data, dict):
             raise ValueError("JSON body must be an object")
         return data
 
+    def _acquire_request_slot(self) -> bool:
+        if API_REQUEST_SLOTS.acquire(blocking=False):
+            return True
+        self._send_json(
+            {"error": "Family Music is busy; retry shortly"},
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+        return False
+
     def _query(self) -> dict[str, list[str]]:
         return urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._acquire_request_slot():
+            return
+        try:
+            self._do_GET()
+        finally:
+            API_REQUEST_SLOTS.release()
+
+    def _do_GET(self) -> None:
         path = urllib.parse.urlsplit(self.path).path
         try:
             if path == "/api/health":
@@ -775,8 +814,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._serve_artwork()
                 return
             if path == "/api/state":
+                # Keep the hot state path provider-free. Artwork recovery is
+                # handled separately by the browser and cached there.
                 players = get_players()
-                resolve_sonos_artwork(players)
                 self._send_json({"players": players, "queues": get_queues()})
                 return
             if path == "/api/native-modes":
@@ -813,6 +853,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": f"Sonos playback failed: {err}"}, HTTPStatus.BAD_GATEWAY)
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._acquire_request_slot():
+            return
+        try:
+            self._do_POST()
+        finally:
+            API_REQUEST_SLOTS.release()
+
+    def _do_POST(self) -> None:
         path = urllib.parse.urlsplit(self.path).path
         try:
             body = self._read_json()
@@ -962,8 +1010,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class FamilyMusicHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = 32
+
+
 def main() -> None:
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = FamilyMusicHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Family Music listening on http://0.0.0.0:{PORT}", flush=True)
     print(f"Music Assistant API: {MA_URL}", flush=True)
     server.serve_forever()
