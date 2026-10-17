@@ -1,3 +1,11 @@
+## 0.2.36
+
+- Enforce configured Family Music destination scope on playback, transport, queue controls, native modes, mute, volume, recents, and returned queues.
+- Reject browser write requests from a foreign Origin while preserving same-origin PWA use and non-browser local clients without an Origin header.
+- Require application/json for all mutating API requests.
+- Keep the login-free household PWA model unchanged; this release does not add authentication yet.
+- No Sonos grouping algorithm, queue ownership, coordinator transfer, or playback-authority behavior changes.
+
 ## 0.2.35
 
 - Make state polling single-flight so a slow Music Assistant response cannot accumulate overlapping 1.5-second polls.

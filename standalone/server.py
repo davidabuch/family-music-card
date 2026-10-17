@@ -45,6 +45,10 @@ class MAError(RuntimeError):
     """Raised when Music Assistant rejects a command."""
 
 
+class AuthorizationError(ValueError):
+    """Raised when a caller targets a destination outside Family Music scope."""
+
+
 class MAClient:
     """Minimal synchronous Music Assistant HTTP API client."""
 
@@ -150,9 +154,35 @@ def get_players() -> list[dict[str, Any]]:
     return players
 
 
-def get_queues() -> list[dict[str, Any]]:
+def _allowed_destination_ids(players: list[dict[str, Any]] | None = None) -> set[str] | None:
+    """Return all queue/player IDs Family Music is permitted to address."""
+    if not PLAYER_ALLOWLIST:
+        return None
+    scoped_players = get_players() if players is None else players
+    allowed = set(PLAYER_ALLOWLIST)
+    for player in scoped_players:
+        for key in ("player_id", "active_source", "synced_to"):
+            value = player.get(key)
+            if isinstance(value, str) and value:
+                allowed.add(value)
+    return allowed
+
+
+def _require_allowed_destination(
+    destination_id: str, players: list[dict[str, Any]] | None = None
+) -> None:
+    allowed = _allowed_destination_ids(players)
+    if allowed is not None and destination_id not in allowed:
+        raise AuthorizationError("Destination is outside the configured Family Music scope")
+
+
+def get_queues(players: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     raw = client.command("player_queues/all")
-    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    queues = [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    allowed = _allowed_destination_ids(players)
+    if allowed is not None:
+        queues = [queue for queue in queues if queue.get("queue_id") in allowed]
+    return queues
 
 
 def _sonos_group_context(
@@ -759,6 +789,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def _validate_write_request(self) -> bool:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            self._send_json(
+                {"error": "Content-Type must be application/json"},
+                HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+            )
+            return False
+
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed = urllib.parse.urlsplit(origin)
+            host = self.headers.get("Host", "")
+            if not parsed.scheme or not parsed.netloc or parsed.netloc != host:
+                self._send_json(
+                    {"error": "Cross-origin commands are not allowed"},
+                    HTTPStatus.FORBIDDEN,
+                )
+                return False
+        return True
+
     def _read_json(self) -> dict[str, Any]:
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -817,10 +868,12 @@ class Handler(BaseHTTPRequestHandler):
                 # Keep the hot state path provider-free. Artwork recovery is
                 # handled separately by the browser and cached there.
                 players = get_players()
-                self._send_json({"players": players, "queues": get_queues()})
+                self._send_json({"players": players, "queues": get_queues(players)})
                 return
             if path == "/api/native-modes":
                 queue_id = self._query().get("queue_id", [""])[0]
+                if queue_id:
+                    _require_allowed_destination(queue_id)
                 modes = sonos_playback_modes(queue_id) if queue_id else {"available": False}
                 self._send_json(modes)
                 return
@@ -833,6 +886,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id:
                     self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
                     return
+                _require_allowed_destination(queue_id)
                 self._send_json(recents(queue_id))
                 return
             if path == "/api/search":
@@ -863,6 +917,8 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self) -> None:
         path = urllib.parse.urlsplit(self.path).path
         try:
+            if not self._validate_write_request():
+                return
             body = self._read_json()
             if path == "/api/play":
                 queue_id = str(body.get("queue_id") or "")
@@ -873,6 +929,7 @@ class Handler(BaseHTTPRequestHandler):
                         HTTPStatus.BAD_REQUEST,
                     )
                     return
+                _require_allowed_destination(queue_id)
                 if isinstance(media, str) and media.startswith("sonos-favorite://"):
                     play_native_sonos_favorite(queue_id, media)
                     result = {"sonos_direct": True}
@@ -897,6 +954,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id or not command:
                     self._send_json({"error": "invalid transport command"}, HTTPStatus.BAD_REQUEST)
                     return
+                _require_allowed_destination(queue_id)
                 if action == "previous":
                     result = previous_transport(queue_id)
                 elif _native_sonos_transport(queue_id, action):
@@ -920,6 +978,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/native-mode-control":
                 queue_id = str(body.get("queue_id") or "")
+                if not queue_id:
+                    self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                _require_allowed_destination(queue_id)
                 result = set_sonos_playback_mode(
                     queue_id, str(body.get("action") or ""), body.get("value")
                 )
@@ -932,6 +994,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id:
                     self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
                     return
+                _require_allowed_destination(queue_id)
                 if action == "seek":
                     result = client.command(
                         "player_queues/seek", queue_id=queue_id, position=int(value)
@@ -955,6 +1018,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not player_id or not isinstance(muted, bool):
                     self._send_json({"error": "invalid player_id or muted"}, HTTPStatus.BAD_REQUEST)
                     return
+                _require_allowed_destination(player_id)
                 result = client.command(
                     "players/cmd/volume_mute",
                     player_id=player_id,
@@ -968,6 +1032,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not player_id or not 0 <= level <= 100:
                     self._send_json({"error": "invalid player_id or level"}, HTTPStatus.BAD_REQUEST)
                     return
+                _require_allowed_destination(player_id)
                 result = client.command(
                     "players/cmd/volume_set",
                     player_id=player_id,
@@ -976,6 +1041,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True, "result": result})
                 return
             self._send_json({"error": "unknown endpoint"}, HTTPStatus.NOT_FOUND)
+        except AuthorizationError as err:
+            self._send_json({"error": str(err)}, HTTPStatus.FORBIDDEN)
         except (MAError, ValueError, TypeError, json.JSONDecodeError) as err:
             self._send_json({"error": str(err)}, HTTPStatus.BAD_GATEWAY)
 
