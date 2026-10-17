@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 import secrets
+import signal
 import threading
 import urllib.error
 import urllib.parse
@@ -1086,7 +1087,18 @@ def main() -> None:
     server = FamilyMusicHTTPServer(("0.0.0.0", PORT), Handler)
     print(f"Family Music listening on http://0.0.0.0:{PORT}", flush=True)
     print(f"Music Assistant API: {MA_URL}", flush=True)
-    server.serve_forever()
+    def stop_server(signum: int, _frame: Any) -> None:
+        print(f"Family Music received signal {signum}; shutting down", flush=True)
+        # shutdown() must run in a different thread from serve_forever().
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, stop_server)
+    signal.signal(signal.SIGINT, stop_server)
+    try:
+        server.serve_forever(poll_interval=0.1)
+    finally:
+        server.server_close()
+        print("Family Music shutdown complete", flush=True)
 
 
 if __name__ == "__main__":
