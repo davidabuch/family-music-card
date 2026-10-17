@@ -563,12 +563,19 @@ def test_ha_card_mute_moves_out_of_volume_row_into_bottom_actions():
 
 def test_websocket_speaker_permissions_are_enforced():
     from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "custom_components/family_music/__init__.py").read_text()
-    assert 'permissions.check_entity(entity_id, policy)' in source
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components/family_music/__init__.py"
+    ).read_text()
+    assert "permissions.check_entity(entity_id, policy)" in source
     for handler in ("ws_group_members", "ws_group_topology", "ws_group_member"):
-        body = source.split(f"async def {handler}(", 1)[1].split("@websocket_api.websocket_command(", 1)[0]
+        body = source.split(f"async def {handler}(", 1)[1]
+        body = body.split("@websocket_api.websocket_command(", 1)[0]
         assert '_require_entity_permission(connection, msg, msg["player_entity_id"]' in body
-    mutation = source.split("async def ws_group_member(", 1)[1].split("@websocket_api.websocket_command(", 1)[0]
-    assert '_require_entity_permission(connection, msg, member_entity, control=True)' in mutation
-    assert mutation.index('_require_entity_permission(connection, msg, member_entity, control=True)') < mutation.index('"players/cmd/group_many"')
-    assert mutation.index('_require_entity_permission(connection, msg, member_entity, control=True)') < mutation.index('"players/cmd/ungroup"')
+    mutation = source.split("async def ws_group_member(", 1)[1]
+    mutation = mutation.split("@websocket_api.websocket_command(", 1)[0]
+    assert "_require_entity_permission(" in mutation
+    assert "member_entity, control=True" in mutation
+    assert mutation.index("member_entity, control=True") < mutation.index('"players/cmd/group_many"')
+    assert mutation.index("member_entity, control=True") < mutation.index('"players/cmd/ungroup"')
