@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.34"' in app_config
+    assert 'version: "0.2.35"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -784,3 +784,54 @@ def test_mute_moves_out_of_volume_row_into_bottom_actions():
     assert bottom.index('id="openSearch"') < bottom.index('id="destination"')
     assert bottom.index('id="destination"') < bottom.index('id="more"')
     assert "grid-template-columns:46px 46px minmax(0,1fr) 46px" in styles
+
+
+def test_state_path_is_provider_free_and_request_bodies_are_bounded():
+    import io
+    import pytest
+
+    server_text = SERVER_PATH.read_text()
+    state_block = server_text.split('if path == "/api/state":', 1)[1].split(
+        'if path == "/api/native-modes":', 1
+    )[0]
+    assert "resolve_sonos_artwork" not in state_block
+    assert standalone.MAX_JSON_BODY_BYTES == 64 * 1024
+    assert standalone.MAX_CONCURRENT_REQUESTS == 6
+
+    handler = object.__new__(standalone.Handler)
+    handler.headers = {"Content-Length": str(standalone.MAX_JSON_BODY_BYTES + 1)}
+    handler.rfile = io.BytesIO(b"")
+    with pytest.raises(ValueError, match="64 KiB"):
+        handler._read_json()
+
+
+def test_polling_is_single_flight_with_backoff_and_no_silent_room_fallback():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert "if (state.refreshPromise) return state.refreshPromise" in app_js
+    assert "state.refreshPromise = null" in app_js
+    assert "setInterval(refreshState" not in app_js
+    assert "schedulePoll(nextDelay)" in app_js
+    assert "Math.min(12000, 1500 * (2 ** state.pollFailures))" in app_js
+    select_block = app_js.split("function renderPlayerSelect()", 1)[1].split(
+        "function destinationIsPlaying", 1
+    )[0]
+    assert "some((p) => p.player_id === state.selectedPlayerId)" not in select_block
+    assert '"Speaker unavailable"' in app_js
+
+
+def test_volume_writes_are_serialized_and_latest_value_coalesced():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert "volumeWrites: new Map()" in app_js
+    assert "if (writer.inFlight || writer.pendingLevel === null) return" in app_js
+    assert "writer.pendingLevel = bounded" in app_js
+    assert "writer.inFlight = true" in app_js
+    assert "writer.inFlight = false" in app_js
+    assert "queueVolumeWrite(player.player_id, bounded, flush)" in app_js
+
+
+def test_sonos_artwork_fallback_is_cached_outside_hot_state_poll():
+    app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert "artworkFallbackCache: new Map()" in app_js
+    assert "state.artworkFallbackCache.get(cacheKey)" in app_js
+    assert "state.artworkFallbackCache.set(cacheKey, lookup)" in app_js
+    assert "state.artworkFallbackCache.size > 100" in app_js
