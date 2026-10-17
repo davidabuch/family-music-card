@@ -1,3 +1,13 @@
+## 0.2.35
+
+- Make state polling single-flight so a slow Music Assistant response cannot accumulate overlapping 1.5-second polls.
+- Back off state polling after failures, up to 12 seconds, while returning to the normal cadence after recovery.
+- Remove provider artwork searches from the hot /api/state path and cache Sonos artwork fallback lookups in the browser.
+- Preserve the selected destination if it temporarily disappears instead of silently switching rooms.
+- Serialize and coalesce volume writes per speaker so delayed requests cannot overwrite a newer volume choice.
+- Add bounded JSON request bodies, socket timeouts, Music Assistant response limits, and a small concurrency guard.
+- Reliability-only hardening; no grouping algorithm, queue ownership, coordinator transfer, or playback-authority redesign.
+
 ## 0.2.34
 
 - Move Mute out of the volume row so Volume Down is no longer adjacent to the mute target.

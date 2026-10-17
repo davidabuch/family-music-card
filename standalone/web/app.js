@@ -6,8 +6,12 @@ const state = {
   provider: "all",
   pendingUri: null,
   pollTimer: null,
+  pollFailures: 0,
+  refreshPromise: null,
   pendingMute: null,
   pendingVolume: null,
+  volumeWrites: new Map(),
+  artworkFallbackCache: new Map(),
   seeking: false,
   nativeModes: null,
   nativeModesPlayerId: null,
@@ -159,25 +163,33 @@ async function recoverSonosArtwork(imageNode, item, originalUrl) {
   const title = mediaName(item);
   const artist = mediaArtist(item);
   if (!title || !artist || !imageNode.isConnected) return;
-  const query = new URLSearchParams({q: title + " " + artist, provider: "apple"});
-  try {
-    const response = await fetch("/api/search?" + query, {cache: "no-store"});
-    if (!response.ok) return;
-    const data = await response.json();
-    const matches = Array.isArray(data.tracks) ? data.tracks : [];
-    const norm = (value) => String(value || "").toLowerCase().trim();
-    const track = matches.find((entry) =>
-      norm(entry.name) === norm(title) &&
-      (entry.artists || []).some((a) => norm(a.name) === norm(artist))
-    );
-    const fallback = track ? mediaImage(track) : "";
-    if (fallback && fallback !== originalUrl && imageNode.isConnected &&
-        imageNode.dataset.artworkSource === originalUrl) {
-      imageNode.onerror = null;
-      imageNode.src = fallback;
+  const cacheKey = title.toLowerCase().trim() + "\n" + artist.toLowerCase().trim();
+  let lookup = state.artworkFallbackCache.get(cacheKey);
+  if (!lookup) {
+    lookup = (async () => {
+      const query = new URLSearchParams({q: title + " " + artist, provider: "apple"});
+      const response = await fetch("/api/search?" + query, {cache: "no-store"});
+      if (!response.ok) return "";
+      const data = await response.json();
+      const matches = Array.isArray(data.tracks) ? data.tracks : [];
+      const norm = (value) => String(value || "").toLowerCase().trim();
+      const track = matches.find((entry) =>
+        norm(entry.name) === norm(title) &&
+        (entry.artists || []).some((a) => norm(a.name) === norm(artist))
+      );
+      return track ? mediaImage(track) : "";
+    })().catch(() => "");
+    state.artworkFallbackCache.set(cacheKey, lookup);
+    if (state.artworkFallbackCache.size > 100) {
+      const oldest = state.artworkFallbackCache.keys().next().value;
+      state.artworkFallbackCache.delete(oldest);
     }
-  } catch {
-    // A missing match should not interrupt playback or other UI functions.
+  }
+  const fallback = await lookup;
+  if (fallback && fallback !== originalUrl && imageNode.isConnected &&
+      imageNode.dataset.artworkSource === originalUrl) {
+    imageNode.onerror = null;
+    imageNode.src = fallback;
   }
 }
 
@@ -200,7 +212,7 @@ function setView(view) {
 
 function renderPlayerSelect() {
   if (!state.players.length) return;
-  if (!state.selectedPlayerId || !state.players.some((p) => p.player_id === state.selectedPlayerId)) {
+  if (!state.selectedPlayerId) {
     state.selectedPlayerId = state.players[0].player_id;
     localStorage.setItem("family-music-player-id", state.selectedPlayerId);
   }
@@ -274,7 +286,7 @@ function renderNow() {
     : (player?.current_media || queue?.current_item || null);
   $("#trackTitle").textContent = mediaName(item);
   $("#trackMeta").textContent = mediaArtist(item) || "—";
-  $("#destinationName").textContent = playerName(player);
+  $("#destinationName").textContent = player ? playerName(player) : "Speaker unavailable";
 
   const artwork = $("#artwork");
   const image = mediaImage(item);
@@ -336,32 +348,47 @@ function renderNow() {
 }
 
 async function refreshState() {
-  try {
-    const result = await api("/api/state");
-    state.players = Array.isArray(result.players) ? result.players.filter((p) => p.available !== false) : [];
-    state.queues = Array.isArray(result.queues) ? result.queues : [];
-    if (state.pendingMute) {
-      const acknowledged = state.players.find((p) => p.player_id === state.pendingMute.playerId);
-      if (
-        (acknowledged && Boolean(acknowledged.volume_muted) === state.pendingMute.muted) ||
-        Date.now() >= state.pendingMute.expiresAt
-      ) {
-        state.pendingMute = null;
+  if (state.refreshPromise) return state.refreshPromise;
+  state.refreshPromise = (async () => {
+    try {
+      const result = await api("/api/state");
+      state.players = Array.isArray(result.players)
+        ? result.players.filter((p) => p.available !== false)
+        : [];
+      state.queues = Array.isArray(result.queues) ? result.queues : [];
+      state.pollFailures = 0;
+      if (state.pendingMute) {
+        const acknowledged = state.players.find((p) => p.player_id === state.pendingMute.playerId);
+        if (
+          (acknowledged && Boolean(acknowledged.volume_muted) === state.pendingMute.muted) ||
+          Date.now() >= state.pendingMute.expiresAt
+        ) {
+          state.pendingMute = null;
+        }
       }
+      renderPlayerSelect();
+      if (state.pendingVolume) {
+        const p = state.players.find((x) => x.player_id === state.pendingVolume.playerId);
+        const actual = p?.type === "group" ? p?.group_volume : p?.volume_level;
+        if (Number(actual) === state.pendingVolume.level ||
+            Date.now() >= state.pendingVolume.expiresAt) {
+          state.pendingVolume = null;
+        }
+      }
+      renderNow();
+      updateDestinationActivity();
+      updateGroupOverlay();
+      void refreshNativeModes();
+      return true;
+    } catch (error) {
+      state.pollFailures = Math.min(state.pollFailures + 1, 4);
+      showToast(error.message, 3000);
+      return false;
+    } finally {
+      state.refreshPromise = null;
     }
-    renderPlayerSelect();
-    if (state.pendingVolume) {
-      const p = state.players.find((x) => x.player_id === state.pendingVolume.playerId);
-      const actual = p?.type === "group" ? p?.group_volume : p?.volume_level;
-      if (Number(actual) === state.pendingVolume.level || Date.now() >= state.pendingVolume.expiresAt) state.pendingVolume = null;
-    }
-    renderNow();
-    updateDestinationActivity();
-    updateGroupOverlay();
-    void refreshNativeModes();
-  } catch (error) {
-    showToast(error.message, 3000);
-  }
+  })();
+  return state.refreshPromise;
 }
 
 function escapeHtml(value) {
@@ -529,22 +556,59 @@ async function transport(action, button) {
   }
 }
 
-let volumeTimer = null;
+function queueVolumeWrite(playerId, level, flush = false) {
+  const bounded = Math.max(0, Math.min(100, Math.round(Number(level))));
+  let writer = state.volumeWrites.get(playerId);
+  if (!writer) {
+    writer = {timer: null, inFlight: false, pendingLevel: null};
+    state.volumeWrites.set(playerId, writer);
+  }
+  writer.pendingLevel = bounded;
+  const drain = async () => {
+    if (writer.inFlight || writer.pendingLevel === null) return;
+    if (writer.timer) {
+      clearTimeout(writer.timer);
+      writer.timer = null;
+    }
+    const nextLevel = writer.pendingLevel;
+    writer.pendingLevel = null;
+    writer.inFlight = true;
+    try {
+      await api("/api/volume", {
+        method: "POST",
+        body: JSON.stringify({player_id: playerId, level: nextLevel}),
+      });
+    } catch (error) {
+      if (state.pendingVolume?.playerId === playerId) state.pendingVolume = null;
+      showToast(error.message, 3000);
+    } finally {
+      writer.inFlight = false;
+      if (writer.pendingLevel !== null) {
+        writer.timer = window.setTimeout(drain, 0);
+      }
+    }
+  };
+  if (flush) {
+    if (writer.timer) clearTimeout(writer.timer);
+    writer.timer = null;
+    void drain();
+  } else if (!writer.timer) {
+    writer.timer = window.setTimeout(drain, 45);
+  }
+}
+
 function setVolume(level, flush = false) {
   const player = selectedPlayer();
   if (!player) return;
   const bounded = Math.max(0, Math.min(100, Math.round(Number(level))));
-  state.pendingVolume = {playerId: player.player_id, level: bounded, expiresAt: Date.now() + 5000};
+  state.pendingVolume = {
+    playerId: player.player_id,
+    level: bounded,
+    expiresAt: Date.now() + 5000,
+  };
   $("#volume").value = bounded;
   $("#volumeValue").textContent = bounded;
-  const send = async () => {
-    volumeTimer = null;
-    try {
-      await api("/api/volume", {method:"POST", body:JSON.stringify({player_id:player.player_id, level:bounded})});
-    } catch (error) { state.pendingVolume = null; showToast(error.message, 3000); }
-  };
-  clearTimeout(volumeTimer);
-  if (flush) send(); else volumeTimer = window.setTimeout(send, 45);
+  queueVolumeWrite(player.player_id, bounded, flush);
 }
 
 async function toggleMute() {
@@ -745,13 +809,16 @@ function wireMemberTrimControls() {
         level: target,
         expiresAt: Date.now() + 5000,
       };
-      api("/api/volume", {
-        method: "POST",
-        body: JSON.stringify({player_id: player.player_id, level: target}),
-      }).catch((error) => showToast(error.message, 3000));
+      queueVolumeWrite(player.player_id, target, false);
     };
-    slider.addEventListener("input", apply);
-    slider.addEventListener("change", apply);
+    slider.addEventListener("input", () => apply(false));
+    slider.addEventListener("change", () => {
+      const target = Math.max(
+        0,
+        Math.min(100, Number(slider.dataset.base) + Number(slider.value) * 2)
+      );
+      queueVolumeWrite(slider.dataset.member, target, true);
+    });
   });
   document.querySelectorAll("[data-reset-balance]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -952,10 +1019,21 @@ function wire() {
   $("#progress").addEventListener("change",(event)=>{seekTo(event.target.value);state.seeking=false;});
 }
 
+function schedulePoll(delay = 1500) {
+  if (state.pollTimer) clearTimeout(state.pollTimer);
+  state.pollTimer = window.setTimeout(async () => {
+    const ok = await refreshState();
+    const nextDelay = ok
+      ? 1500
+      : Math.min(12000, 1500 * (2 ** state.pollFailures));
+    schedulePoll(nextDelay);
+  }, delay);
+}
+
 async function boot() {
   wire();
   await refreshState();
-  state.pollTimer = window.setInterval(refreshState, 1500);
+  schedulePoll(1500);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
 }
 
