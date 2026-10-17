@@ -47,3 +47,6 @@
 
 .group-balance-section{margin-top:16px;padding-top:14px;border-top:1px solid #ffffff14}
 .group-balance-section h4{font-size:14px;margin:0 0 8px}
+
+/* Preserve repeated iOS volume taps without disabling page pinch zoom. */
+#volumeDown, #volumeUp { touch-action: manipulation; }
