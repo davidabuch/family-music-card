@@ -577,5 +577,6 @@ def test_websocket_speaker_permissions_are_enforced():
     mutation = mutation.split("@websocket_api.websocket_command(", 1)[0]
     assert "_require_entity_permission(" in mutation
     assert "member_entity, control=True" in mutation
-    assert mutation.index("member_entity, control=True") < mutation.index('"players/cmd/group_many"')
-    assert mutation.index("member_entity, control=True") < mutation.index('"players/cmd/ungroup"')
+    guard_position = mutation.index("member_entity, control=True")
+    assert guard_position < mutation.index('"players/cmd/group_many"')
+    assert guard_position < mutation.index('"players/cmd/ungroup"')
