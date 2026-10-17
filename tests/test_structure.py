@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.22"
+    assert manifest["version"] == "0.3.23"
     assert card_path.exists()
 
 
@@ -559,3 +559,24 @@ def test_ha_card_mute_moves_out_of_volume_row_into_bottom_actions():
     assert bottom.index('id="openSearch"') < bottom.index('id="destinationButton"')
     assert bottom.index('id="destinationButton"') < bottom.index('id="moreButton"')
     assert "grid-template-columns:52px 52px minmax(0,1fr) 52px" in card_text
+
+
+def test_websocket_speaker_permissions_are_enforced():
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "custom_components/family_music/__init__.py"
+    ).read_text()
+    assert "permissions.check_entity(entity_id, policy)" in source
+    for handler in ("ws_group_members", "ws_group_topology", "ws_group_member"):
+        body = source.split(f"async def {handler}(", 1)[1]
+        body = body.split("@websocket_api.websocket_command(", 1)[0]
+        assert '_require_entity_permission(connection, msg, msg["player_entity_id"]' in body
+    mutation = source.split("async def ws_group_member(", 1)[1]
+    mutation = mutation.split("@websocket_api.websocket_command(", 1)[0]
+    assert "_require_entity_permission(" in mutation
+    assert "member_entity, control=True" in mutation
+    guard_position = mutation.index("member_entity, control=True")
+    assert guard_position < mutation.index('"players/cmd/group_many"')
+    assert guard_position < mutation.index('"players/cmd/ungroup"')
