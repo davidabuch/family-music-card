@@ -897,3 +897,30 @@ def test_state_filters_queues_when_allowlist_is_configured():
         'if path == "/api/native-modes":', 1
     )[0]
     assert "get_queues(players)" in state_block
+
+
+def test_server_exits_cleanly_on_supervisor_sigterm():
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    env = dict(os.environ, PORT="0")
+    process = subprocess.Popen(
+        [sys.executable, str(SERVER_PATH)],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert process.stdout is not None
+        assert "Family Music listening" in process.stdout.readline()
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == 0, stderr
+        assert "Family Music shutdown complete" in stdout
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)
