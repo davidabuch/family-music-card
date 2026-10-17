@@ -788,6 +788,7 @@ def test_mute_moves_out_of_volume_row_into_bottom_actions():
 
 def test_state_path_is_provider_free_and_request_bodies_are_bounded():
     import io
+
     import pytest
 
     server_text = SERVER_PATH.read_text()
