@@ -9,6 +9,8 @@ const state = {
   artistFilter: null,
   favoritesProvider: "all",
   favoritesResults: null,
+  favoritesLoadedAt: 0,
+  favoritesLoading: false,
   pendingUri: null,
   pollTimer: null,
   pollFailures: 0,
@@ -211,7 +213,12 @@ function setView(view) {
   document.querySelectorAll(".tabbar button").forEach((node) => node.classList.remove("active"));
   $(`#${view}View`)?.classList.add("active");
   document.querySelector(`.tabbar button[data-view="${view}"]`)?.classList.add("active");
-  if (view === "favorites") loadFavorites();
+  if (view === "favorites") {
+    if (state.favoritesResults) showFavorites(false);
+    if (!state.favoritesResults || Date.now() - state.favoritesLoadedAt > 30000) {
+      void loadFavorites();
+    }
+  }
   if (view === "recents") loadRecents();
 }
 
@@ -538,21 +545,33 @@ function filterFavoriteProvider(data, provider) {
   return filtered;
 }
 
-function showFavorites() {
+function showFavorites(force = true) {
   const body = $("#favoritesBody");
   if (!state.favoritesResults) return;
+  // Keep existing image nodes intact when merely returning to this tab.
+  if (!force && body.querySelector(".media-item, .recent-item")) return;
   renderSections(body, filterFavoriteProvider(state.favoritesResults, state.favoritesProvider));
 }
 
 async function loadFavorites() {
+  if (state.favoritesLoading) return;
+  state.favoritesLoading = true;
   const body = $("#favoritesBody");
-  body.innerHTML = '<div class="empty">Loading favorites…</div>';
+  if (!state.favoritesResults) {
+    body.innerHTML = '<div class="empty">Loading favorites…</div>';
+  }
   try {
     const data = await api("/api/favorites");
+    const changed = JSON.stringify(data) !== JSON.stringify(state.favoritesResults);
     state.favoritesResults = data;
-    showFavorites();
+    state.favoritesLoadedAt = Date.now();
+    if (changed) showFavorites();
   } catch (error) {
-    body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    if (!state.favoritesResults) {
+      body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    }
+  } finally {
+    state.favoritesLoading = false;
   }
 }
 
