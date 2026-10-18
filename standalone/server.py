@@ -882,6 +882,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "artwork unavailable"}, HTTPStatus.BAD_GATEWAY)
             return
 
+        # A truncated JPEG can return HTTP 200 and render only its top rows.
+        # Reject it rather than caching broken artwork for an hour.
+        if content_type == "image/jpeg" and not (
+            len(content) >= 4 and content[:2] == b"\xff\xd8" and content[-2:] == b"\xff\xd9"
+        ):
+            self._send_json({"error": "incomplete JPEG artwork"}, HTTPStatus.BAD_GATEWAY)
+            return
+
         with ARTWORK_CACHE_LOCK:
             # Evict expired entries first, then oldest entries to bound memory.
             for key, entry in list(ARTWORK_CACHE.items()):
