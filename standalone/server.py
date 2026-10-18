@@ -676,6 +676,25 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
             summary=False,
         )
         result[key] = [normalize_item(item) for item in raw if isinstance(item, dict)]
+    # MA may import saved Apple Music/Spotify playlists without marking them
+    # as MA favorites. Show them as saved library items without changing flags.
+    saved = client.command(
+        "music/playlists/library_items",
+        limit=500,
+        offset=0,
+        order_by="sort_name",
+        summary=False,
+    )
+    known = {item.get("uri") for item in result["playlists"]}
+    for item in saved if isinstance(saved, list) else []:
+        if not isinstance(item, dict):
+            continue
+        normalized = normalize_item(item)
+        if (normalized.get("uri") not in known
+                and set(normalized.get("providers", [])) & {"apple_music", "spotify"}):
+            normalized["saved_library"] = True
+            result["playlists"].append(normalized)
+            known.add(normalized.get("uri"))
     result["sonos_favorites"] = native_sonos_favorites()
     return result
 
