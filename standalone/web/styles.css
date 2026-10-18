@@ -50,3 +50,8 @@
 
 /* Preserve repeated iOS volume taps without disabling page pinch zoom. */
 #volumeDown, #volumeUp { touch-action: manipulation; }
+
+/* Explicit selection affordance for music type and provider facets. */
+.search-type,.favorite-provider{border:1px solid #ffffff30;border-radius:999px;background:#ffffff10;color:#e9e5e3;padding:10px 14px;font-weight:700;white-space:nowrap;cursor:pointer}
+.search-type.active,.favorite-provider.active,.provider.active{background:#ff375f;color:#fff;border:1px solid #ff9db0;box-shadow:0 0 0 2px #ff375f55;font-weight:900}
+.search-type:focus-visible,.favorite-provider:focus-visible,.provider:focus-visible{outline:3px solid #fff;outline-offset:3px}
