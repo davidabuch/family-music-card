@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.38"' in app_config
+    assert 'version: "0.2.39"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -924,3 +924,32 @@ def test_server_exits_cleanly_on_supervisor_sigterm():
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=5)
+
+
+def test_normalize_item_preserves_provider_mappings_for_favorites():
+    item = {
+        "uri": "library://album/1",
+        "name": "Album",
+        "provider_mappings": [
+            {"provider_instance": "apple_music--account"},
+            {"provider_domain": "spotify"},
+        ],
+    }
+    result = standalone.normalize_item(item)
+    assert result["providers"] == ["apple_music", "spotify"]
+
+
+def test_search_returns_separate_artist_album_and_track_collections(monkeypatch):
+    def fake_command(command, **kwargs):
+        assert command == "music/search"
+        assert set(kwargs["media_types"]) == {"artist", "album", "track", "playlist", "radio"}
+        return {
+            "artists": [{"uri": "apple_music://artist/1", "name": "Ed Sheeran"}],
+            "albums": [{"uri": "apple_music://album/2", "name": "Divide"}],
+            "tracks": [{"uri": "apple_music://track/3", "name": "Shape of You"}],
+        }
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    result = standalone.search("Ed Sheeran", provider="apple")
+    assert [item["name"] for item in result["artists"]] == ["Ed Sheeran"]
+    assert [item["name"] for item in result["albums"]] == ["Divide"]
+    assert [item["name"] for item in result["tracks"]] == ["Shape of You"]

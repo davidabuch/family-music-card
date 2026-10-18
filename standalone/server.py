@@ -133,6 +133,15 @@ def normalize_item(item: Any) -> dict[str, Any]:
         "favorite": bool(item.get("favorite", False)),
         "duration": item.get("duration"),
     }
+    mappings = item.get("provider_mappings") or []
+    providers = sorted({
+        str(mapping.get("provider_instance") or mapping.get("provider_domain") or "")
+        .split("--")[0]
+        for mapping in mappings
+        if isinstance(mapping, dict)
+    })
+    if providers:
+        result["providers"] = providers
     artists = item.get("artists")
     if isinstance(artists, list):
         result["artists"] = [

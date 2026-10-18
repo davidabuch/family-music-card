@@ -4,6 +4,10 @@ const state = {
   selectedPlayerId: localStorage.getItem("family-music-player-id") || null,
   view: "now",
   provider: "all",
+  searchType: "albums",
+  searchResults: null,
+  favoritesProvider: "all",
+  favoritesResults: null,
   pendingUri: null,
   pollTimer: null,
   pollFailures: 0,
@@ -480,12 +484,12 @@ async function playItem(item, button) {
 
 function renderSections(target, data) {
   const sections = [
-    ["Sonos Favorites", data.sonos_favorites],
     ["Artists", data.artists],
     ["Albums", data.albums],
     ["Tracks", data.tracks],
     ["Playlists", data.playlists],
     ["Radio", data.radio],
+    ["Sonos Favorites", data.sonos_favorites],
   ].filter(([, items]) => Array.isArray(items) && items.length);
   if (!sections.length) {
     target.innerHTML = '<div class="empty">Nothing here yet.</div>';
@@ -497,12 +501,39 @@ function renderSections(target, data) {
   wirePlayable(target, sections.map(([, items]) => items));
 }
 
+function providerOf(item) {
+  if (item?.sonos_favorite || String(item?.uri || "").startsWith("sonos-favorite://")) return "sonos";
+  const providers = item?.providers || [];
+  if (providers.includes("apple_music")) return "apple";
+  if (providers.includes("spotify")) return "spotify";
+  const uri = String(item?.uri || "");
+  if (uri.startsWith("apple_music://")) return "apple";
+  if (uri.startsWith("spotify://")) return "spotify";
+  return "library";
+}
+
+function filterFavoriteProvider(data, provider) {
+  if (provider === "all") return data;
+  const filtered = {};
+  for (const [kind, items] of Object.entries(data || {})) {
+    filtered[kind] = (items || []).filter((item) => providerOf(item) === provider);
+  }
+  return filtered;
+}
+
+function showFavorites() {
+  const body = $("#favoritesBody");
+  if (!state.favoritesResults) return;
+  renderSections(body, filterFavoriteProvider(state.favoritesResults, state.favoritesProvider));
+}
+
 async function loadFavorites() {
   const body = $("#favoritesBody");
   body.innerHTML = '<div class="empty">Loading favorites…</div>';
   try {
     const data = await api("/api/favorites");
-    renderSections(body, data);
+    state.favoritesResults = data;
+    showFavorites();
   } catch (error) {
     body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
@@ -527,6 +558,48 @@ async function loadRecents() {
   }
 }
 
+const SEARCH_TYPES = {
+  artists: "artists", albums: "albums", songs: "tracks",
+  playlists: "playlists", radio: "radio",
+};
+
+function showSearchResults() {
+  const body = $("#searchBody");
+  const key = SEARCH_TYPES[state.searchType] || "albums";
+  const items = state.searchResults?.[key] || [];
+  const title = {artists: "Artists", albums: "Albums", songs: "Songs",
+    playlists: "Playlists", radio: "Stations"}[state.searchType] || "Albums";
+  if (!items.length) {
+    body.innerHTML = '<div class="empty">No ' + title.toLowerCase() + ' found. Try another search or provider.</div>';
+    return;
+  }
+  body.innerHTML = '<section class="section"><h3>' + title + ' (' + items.length +
+    ')</h3><div class="grid">' + items.map((item) => itemMarkup(item)).join("") +
+    '</div></section>';
+  if (state.searchType === "artists") {
+    body.querySelectorAll(".playable").forEach((button) => {
+      button.addEventListener("click", () => {
+        const artist = findItem(button.dataset.uri, [items]);
+        if (!artist) return;
+        $("#searchInput").value = artist.name;
+        state.searchType = "albums";
+        syncSearchType();
+        runSearch();
+      });
+    });
+  } else {
+    wirePlayable(body, [items]);
+  }
+}
+
+function syncSearchType() {
+  document.querySelectorAll(".search-type").forEach((button) => {
+    const active = button.dataset.type === state.searchType;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+  });
+}
+
 async function runSearch() {
   const query = $("#searchInput").value.trim();
   if (!query) return;
@@ -534,7 +607,8 @@ async function runSearch() {
   body.innerHTML = '<div class="empty">Searching…</div>';
   try {
     const data = await api(`/api/search?q=${encodeURIComponent(query)}&provider=${encodeURIComponent(state.provider)}`);
-    renderSections(body, data);
+    state.searchResults = data;
+    showSearchResults();
   } catch (error) {
     body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
@@ -993,7 +1067,9 @@ function startVoiceSearch() {
 function wire() {
   document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
-  document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});}));
+  document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});if(state.searchResults)runSearch();}));
+  document.querySelectorAll(".search-type").forEach((button)=>button.addEventListener("click",()=>{state.searchType=button.dataset.type;syncSearchType();if(state.searchResults)showSearchResults();}));
+  document.querySelectorAll(".favorite-provider").forEach((button)=>button.addEventListener("click",()=>{state.favoritesProvider=button.dataset.favoriteProvider;document.querySelectorAll(".favorite-provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});showFavorites();}));
   $("#searchButton").addEventListener("click", runSearch);
   $("#voiceSearch").addEventListener("click", startVoiceSearch);
   $("#searchInput").addEventListener("keydown",(event)=>{if(event.key==="Enter")runSearch();});

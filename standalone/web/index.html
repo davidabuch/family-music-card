@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Family Music">
   <title>Family Music</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=0.2.38">
+  <link rel="stylesheet" href="/styles.css?v=0.2.39">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/approved-v2/icon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/icons/approved-v2/icon-16.png"><link rel="shortcut icon" href="/favicon.ico"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=approved-v2"><link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=approved-v2"></head>
 <body>
   <main id="app" class="app-shell">
@@ -56,13 +56,13 @@
       <div id="overlay" class="overlay"></div>
     </section>
 
-    <section id="favoritesView" class="view browser-view"><header><button class="back-now">‹</button><h2>Favorites</h2></header><div id="favoritesBody" class="content"></div></section>
+    <section id="favoritesView" class="view browser-view"><header><button class="back-now">‹</button><h2>Favorites</h2></header><div class="provider-row" aria-label="Filter favorites by service"><button class="favorite-provider active" data-favorite-provider="all" aria-pressed="true">All</button><button class="favorite-provider" data-favorite-provider="apple" aria-pressed="false">Apple Music</button><button class="favorite-provider" data-favorite-provider="spotify" aria-pressed="false">Spotify</button><button class="favorite-provider" data-favorite-provider="library" aria-pressed="false">Library</button><button class="favorite-provider" data-favorite-provider="sonos" aria-pressed="false">Sonos</button></div><div id="favoritesBody" class="content"></div></section>
     <section id="recentsView" class="view browser-view"><header><button class="back-now">‹</button><h2>Recently Played</h2></header><div id="recentsBody" class="content"></div></section>
     <section id="searchView" class="view browser-view">
       <header><button class="back-now" aria-label="Back to Now Playing">‹</button><h2>Search</h2></header>
       <div class="searchbar"><label class="sr-only" for="searchInput">Search artists, albums, songs, playlists or stations</label><input id="searchInput" type="search" enterkeyhint="search" autocomplete="off" placeholder="Artist, album, song, playlist or station…"><button id="voiceSearch" type="button" class="voice-search" aria-label="Search by voice" aria-pressed="false" title="Search by voice"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 17v5m-4 0h8"/></svg></button><button id="searchButton" type="button">Search</button></div><p id="voiceStatus" class="sr-only" role="status" aria-live="polite"></p>
       <div class="provider-row"><button class="provider active" data-provider="all" aria-pressed="true">All</button><button class="provider" data-provider="apple" aria-pressed="false">Apple Music</button><button class="provider" data-provider="spotify" aria-pressed="false">Spotify</button></div>
-      <div id="searchBody" class="content" aria-live="polite" aria-relevant="additions text"></div>
+      <div class="provider-row" aria-label="Search by music type"><button class="search-type" data-type="artists" aria-pressed="false">Artists</button><button class="search-type active" data-type="albums" aria-pressed="true">Albums</button><button class="search-type" data-type="songs" aria-pressed="false">Songs</button><button class="search-type" data-type="playlists" aria-pressed="false">Playlists</button><button class="search-type" data-type="radio" aria-pressed="false">Stations</button></div><div id="searchBody" class="content" aria-live="polite" aria-relevant="additions text"></div>
     </section>
     <nav class="tabbar" aria-label="Family Music">
       <button class="active" data-view="now"><span>⌂</span><small>Now</small></button>
@@ -72,6 +72,6 @@
     </nav>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
-  <script src="/app.js?v=0.2.38" defer></script>
+  <script src="/app.js?v=0.2.39" defer></script>
 </body>
 </html>
