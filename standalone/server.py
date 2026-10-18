@@ -887,7 +887,11 @@ class Handler(BaseHTTPRequestHandler):
             for key, entry in list(ARTWORK_CACHE.items()):
                 if entry[0] <= now:
                     del ARTWORK_CACHE[key]
-            while ARTWORK_CACHE and sum(len(entry[2]) for entry in ARTWORK_CACHE.values()) + len(content) > ARTWORK_CACHE_MAX_BYTES:
+            while (
+                ARTWORK_CACHE
+                and sum(len(entry[2]) for entry in ARTWORK_CACHE.values()) + len(content)
+                > ARTWORK_CACHE_MAX_BYTES
+            ):
                 del ARTWORK_CACHE[next(iter(ARTWORK_CACHE))]
             if len(content) <= ARTWORK_CACHE_MAX_BYTES:
                 ARTWORK_CACHE[cache_key] = (now + ARTWORK_CACHE_TTL, content_type, content)
