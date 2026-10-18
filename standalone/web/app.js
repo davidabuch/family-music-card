@@ -6,6 +6,7 @@ const state = {
   provider: "all",
   searchType: "albums",
   searchResults: null,
+  artistFilter: null,
   favoritesProvider: "all",
   favoritesResults: null,
   pendingUri: null,
@@ -566,7 +567,11 @@ const SEARCH_TYPES = {
 function showSearchResults() {
   const body = $("#searchBody");
   const key = SEARCH_TYPES[state.searchType] || "albums";
-  const items = state.searchResults?.[key] || [];
+  const results = state.searchResults?.[key] || [];
+  const items = state.searchType === "albums" && state.artistFilter
+    ? results.filter((item) => (item.artists || []).some((artist) =>
+        String(artist.name || "").toLocaleLowerCase() === state.artistFilter.toLocaleLowerCase()))
+    : results;
   const title = {artists: "Artists", albums: "Albums", songs: "Songs",
     playlists: "Playlists", radio: "Stations"}[state.searchType] || "Albums";
   if (!items.length) {
@@ -582,6 +587,7 @@ function showSearchResults() {
         const artist = findItem(button.dataset.uri, [items]);
         if (!artist) return;
         $("#searchInput").value = artist.name;
+        state.artistFilter = artist.name;
         state.searchType = "albums";
         syncSearchType();
         runSearch();
@@ -603,6 +609,7 @@ function syncSearchType() {
 async function runSearch() {
   const query = $("#searchInput").value.trim();
   if (!query) return;
+  if (state.artistFilter && query.toLocaleLowerCase() !== state.artistFilter.toLocaleLowerCase()) state.artistFilter = null;
   const body = $("#searchBody");
   body.innerHTML = '<div class="empty">Searching…</div>';
   try {
@@ -1068,7 +1075,7 @@ function wire() {
   document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
   document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});if(state.searchResults)runSearch();}));
-  document.querySelectorAll(".search-type").forEach((button)=>button.addEventListener("click",()=>{state.searchType=button.dataset.type;syncSearchType();if(state.searchResults)showSearchResults();}));
+  document.querySelectorAll(".search-type").forEach((button)=>button.addEventListener("click",()=>{state.searchType=button.dataset.type;if(state.searchType!=="albums")state.artistFilter=null;syncSearchType();if(state.searchResults)showSearchResults();}));
   document.querySelectorAll(".favorite-provider").forEach((button)=>button.addEventListener("click",()=>{state.favoritesProvider=button.dataset.favoriteProvider;document.querySelectorAll(".favorite-provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});showFavorites();}));
   $("#searchButton").addEventListener("click", runSearch);
   $("#voiceSearch").addEventListener("click", startVoiceSearch);
