@@ -37,13 +37,16 @@ def main():
     username = input("Music Assistant username: ").strip()
     password = getpass.getpass("Music Assistant password (not echoed): ")
     try:
-        status, result = request("/auth/login", {
-            "provider_id": "builtin",
-            "credentials": {"username": username, "password": password},
+        status, result = request("/api", {
+            "message_id": "family-music-login-probe",
+            "command": "auth/login",
+            "args": {"provider_id": "builtin", "username": username, "password": password,
+                     "device_name": "Family Music local auth probe"},
         })
     finally:
         del password
-    token = result.get("access_token") or result.get("token")
+    login = result.get("result", result) if isinstance(result, dict) else {}
+    token = login.get("access_token") if isinstance(login, dict) and login.get("success") else None
     print("HTTP login status:", status)
     print("User token issued:", bool(token))
     if not token:
