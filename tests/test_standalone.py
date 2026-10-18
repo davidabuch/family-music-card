@@ -1051,3 +1051,23 @@ def test_artwork_cache_is_bounded_and_private():
     assert standalone.ARTWORK_CACHE_MAX_BYTES == 24 * 1024 * 1024
     assert standalone.ARTWORK_CACHE_TTL == 3600
     assert isinstance(standalone.ARTWORK_CACHE_LOCK, type(__import__("threading").Lock()))
+
+
+def test_artwork_burst_waits_for_available_request_slot(monkeypatch):
+    class RecordingSemaphore:
+        def __init__(self):
+            self.waits = []
+
+        def acquire(self, **kwargs):
+            self.waits.append(kwargs)
+            return True
+
+    semaphore = RecordingSemaphore()
+    monkeypatch.setattr(standalone, "API_REQUEST_SLOTS", semaphore)
+    handler = object.__new__(standalone.Handler)
+    handler.path = "/api/artwork?path=%2Fimageproxy%2Fabc"
+    assert handler._acquire_request_slot()
+    assert semaphore.waits == [{"timeout": 20}]
+    handler.path = "/api/state"
+    assert handler._acquire_request_slot()
+    assert semaphore.waits[-1] == {"timeout": 2}
