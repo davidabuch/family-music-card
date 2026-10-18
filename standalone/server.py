@@ -942,7 +942,11 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def _acquire_request_slot(self) -> bool:
-        if API_REQUEST_SLOTS.acquire(blocking=False):
+        # Artwork loads arrive in bursts when Favorites opens. Queue briefly
+        # instead of returning 503 for every request above the six-slot limit.
+        path = urllib.parse.urlsplit(self.path).path
+        wait_seconds = 20 if path in ("/api/artwork", "/api/sonos-artwork") else 2
+        if API_REQUEST_SLOTS.acquire(timeout=wait_seconds):
             return True
         self._send_json(
             {"error": "Family Music is busy; retry shortly"},
