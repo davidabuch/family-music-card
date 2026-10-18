@@ -117,7 +117,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.40"' in app_config
+    assert 'version: "0.2.41"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -998,3 +998,21 @@ def test_group_sonos_favorite_never_guesses_when_missing(monkeypatch):
         standalone.resolve_group_sonos_favorite(
             SimpleNamespace(title="Missing", item_class="object.item.audioItem.musicTrack")
         )
+
+
+def test_normalize_item_preserves_ma_artwork_proxy_id():
+    proxy_id = "510bac24e668fe214e46a77d08ed15f172079b4c899b373c4de1a813a9f3fba4"
+    image_url = "https://is1-ssl.mzstatic.com/image/thumb/example.png/1000x1000.jpg"
+    item = {"name": "Today's Hits", "metadata": {"images": [
+        {"path": image_url, "proxy_id": proxy_id}
+    ]}}
+    assert standalone.normalize_item(item)["image"] == {
+        "path": image_url, "proxy_id": proxy_id
+    }
+
+
+def test_normalize_item_rejects_invalid_artwork_proxy_id():
+    item = {"metadata": {"images": [
+        {"path": "https://example.com/image.jpg", "proxy_id": "invalid"}
+    ]}}
+    assert standalone.normalize_item(item)["image"] == "https://example.com/image.jpg"
