@@ -425,7 +425,7 @@ function itemMarkup(item, row = false) {
   const subtitle = escapeHtml(itemSubtitle(item));
   const imageUrl = mediaImage(item);
   const image = imageUrl
-    ? `<img src="${escapeHtml(imageUrl)}" alt="">`
+    ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" decoding="async">`
     : "<span>♪</span>";
   if (row) {
     return `<button class="recent-item playable" data-uri="${uri}">
@@ -522,6 +522,12 @@ function renderSections(target, data) {
   target.innerHTML = sections
     .map(([title, items]) => `<section class="section"><h3>${title}</h3><div class="grid">${items.map((item) => itemMarkup(item)).join("")}</div></section>`)
     .join("");
+  target.querySelectorAll(".grid img").forEach((img, index) => {
+    if (index < 4) {
+      img.loading = "eager";
+      img.fetchPriority = "high";
+    }
+  });
   wirePlayable(target, sections.map(([, items]) => items));
 }
 
