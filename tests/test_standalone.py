@@ -61,9 +61,11 @@ def test_favorites_call_music_assistant_library_commands(monkeypatch):
     result = standalone.favorites(limit=12)
 
     assert set(result) == {"artists", "albums", "tracks", "playlists", "radio", "sonos_favorites"}
-    assert len(calls) == 5
-    assert all(call[1]["favorite"] is True for call in calls)
-    assert all(call[1]["limit"] == 12 for call in calls)
+    assert len(calls) == 6
+    assert all(call[1]["favorite"] is True for call in calls[:5])
+    assert all(call[1]["limit"] == 12 for call in calls[:5])
+    assert calls[5][0] == "music/playlists/library_items"
+    assert "favorite" not in calls[5][1]
 
 
 def test_search_scopes_provider_domains(monkeypatch):
