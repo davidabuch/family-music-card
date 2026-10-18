@@ -118,6 +118,14 @@ def _item_image(item: dict[str, Any]) -> str | None:
         if isinstance(images, list):
             for entry in images:
                 if isinstance(entry, dict) and isinstance(entry.get("path"), str):
+                    # Keep MA's proxy identifier: the browser can fetch artwork
+                    # through our authenticated MA proxy instead of relying on
+                    # the original provider CDN being reachable on the device.
+                    proxy_id = entry.get("proxy_id")
+                    if isinstance(proxy_id, str) and len(proxy_id) == 64 and all(
+                        character in "0123456789abcdefABCDEF" for character in proxy_id
+                    ):
+                        return {"path": entry["path"], "proxy_id": proxy_id}
                     return entry["path"]
     return None
 
