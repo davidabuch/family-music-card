@@ -998,3 +998,21 @@ def test_group_sonos_favorite_never_guesses_when_missing(monkeypatch):
         standalone.resolve_group_sonos_favorite(
             SimpleNamespace(title="Missing", item_class="object.item.audioItem.musicTrack")
         )
+
+
+def test_normalize_item_preserves_ma_artwork_proxy_id():
+    proxy_id = "510bac24e668fe214e46a77d08ed15f172079b4c899b373c4de1a813a9f3fba4"
+    image_url = "https://is1-ssl.mzstatic.com/image/thumb/example.png/1000x1000.jpg"
+    item = {"name": "Today's Hits", "metadata": {"images": [
+        {"path": image_url, "proxy_id": proxy_id}
+    ]}}
+    assert standalone.normalize_item(item)["image"] == {
+        "path": image_url, "proxy_id": proxy_id
+    }
+
+
+def test_normalize_item_rejects_invalid_artwork_proxy_id():
+    item = {"metadata": {"images": [
+        {"path": "https://example.com/image.jpg", "proxy_id": "invalid"}
+    ]}}
+    assert standalone.normalize_item(item)["image"] == "https://example.com/image.jpg"
