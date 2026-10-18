@@ -51,6 +51,16 @@ def main():
     print("User token issued:", bool(token))
     if not token:
         raise SystemExit("Login did not yield a token; no further calls made")
+    # Verify that the issued token actually resolves to the intended user.
+    status, me = request("/api", {
+        "message_id": "family-music-whoami-probe", "command": "auth/me", "args": {},
+    }, token=token)
+    identity = me.get("result") if isinstance(me, dict) else None
+    verified = (status == 200 and isinstance(identity, dict) and
+                str(identity.get("username", "")).casefold() == username.casefold())
+    print("Authenticated identity matches entered username:", verified)
+    if not verified:
+        raise SystemExit("SECURITY FAIL: user identity not verified")
     # Read-only requests. Do not print player IDs, library titles, or secrets.
     for command in ("players/all", "music/playlists/library_items"):
         status, response = request("/api", {
