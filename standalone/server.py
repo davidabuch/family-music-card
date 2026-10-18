@@ -108,7 +108,7 @@ def _json_bytes(value: Any) -> bytes:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def _item_image(item: dict[str, Any]) -> str | None:
+def _item_image(item: dict[str, Any]) -> str | dict[str, str] | None:
     image = item.get("image")
     if isinstance(image, str):
         return image
