@@ -1016,3 +1016,30 @@ def test_normalize_item_rejects_invalid_artwork_proxy_id():
         {"path": "https://example.com/image.jpg", "proxy_id": "invalid"}
     ]}}
     assert standalone.normalize_item(item)["image"] == "https://example.com/image.jpg"
+
+
+def test_favorites_include_saved_provider_playlists_without_changing_flags(monkeypatch):
+    def fake_command(command, **kwargs):
+        if command != "music/playlists/library_items":
+            return []
+        if kwargs.get("favorite") is True:
+            return [{"uri": "library://playlist/1", "name": "Favorite", "favorite": True}]
+        return [
+            {"uri": "library://playlist/1", "name": "Favorite", "favorite": True},
+            {"uri": "library://playlist/9", "name": "Biking workout", "favorite": False,
+             "provider_mappings": [{"provider_domain": "apple_music"}]},
+            {"uri": "library://playlist/27", "name": "Top 40", "favorite": False,
+             "provider_mappings": [{"provider_domain": "spotify"}]},
+            {"uri": "library://playlist/99", "name": "Unrelated", "favorite": False,
+             "provider_mappings": [{"provider_domain": "other"}]},
+        ]
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [])
+    items = standalone.favorites()["playlists"]
+    assert [item["uri"] for item in items] == [
+        "library://playlist/1", "library://playlist/9", "library://playlist/27"
+    ]
+    assert items[1]["saved_library"] is True
+    assert items[1]["favorite"] is False
+    assert items[2]["saved_library"] is True
