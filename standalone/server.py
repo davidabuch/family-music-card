@@ -369,6 +369,41 @@ def native_sonos_favorites() -> list[dict[str, Any]]:
     return result
 
 
+def resolve_group_sonos_favorite(entry: Any) -> str:
+    """Find an unambiguous MA catalog equivalent for a Sonos favorite.
+
+    MA virtual groups cannot be addressed through Sonos UPnP. Never redirect
+    playback to an arbitrary physical speaker or guess among catalog matches.
+    """
+    title = str(getattr(entry, "title", "") or "").strip()
+    item_class = str(getattr(entry, "item_class", "") or "").lower()
+    kind = (
+        "playlist" if "playlist" in item_class else
+        "album" if "album" in item_class else
+        "radio" if "broadcast" in item_class or "radio" in item_class else
+        "track"
+    )
+    key = "radio" if kind == "radio" else kind + "s"
+    raw = client.command(
+        "music/search", search_query=title, media_types=[kind],
+        limit=25, providers=["apple_music", "spotify"],
+    )
+    candidates = raw.get(key, []) if isinstance(raw, dict) else []
+    matches = {
+        str(item.get("uri")) for item in candidates
+        if isinstance(item, dict)
+        and str(item.get("name") or item.get("title") or "").casefold().strip()
+        == title.casefold()
+        and item.get("uri")
+    }
+    if len(matches) != 1:
+        raise ValueError(
+            "This Sonos favorite cannot be resolved uniquely for a speaker group. "
+            "Use its Apple Music or Spotify catalog version instead."
+        )
+    return next(iter(matches))
+
+
 def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     """Play a Sonos favorite on its matching physical Sonos speaker."""
     from soco.discovery import discover
@@ -389,16 +424,22 @@ def play_native_sonos_favorite(queue_id: str, uri: str) -> None:
     if player is None:
         raise ValueError("Selected player not found")
     speakers = discover(timeout=3) or set()
-    speaker = next(
-        (sp for sp in speakers if sp.uid == player_id),
-        None,
-    )
-    if speaker is None:
-        raise ValueError("Selected destination is not a directly reachable Sonos speaker")
-    entries = speaker.music_library.get_sonos_favorites() or []
+    speaker = next((sp for sp in speakers if sp.uid == player_id), None)
+    source = speaker or _sonos_household()
+    if source is None:
+        raise ValueError("Sonos household is not reachable")
+    entries = source.music_library.get_sonos_favorites() or []
     if index >= len(entries):
         raise ValueError("Sonos Favorite is no longer available; refresh Favorites")
     entry = entries[index]
+    if speaker is None:
+        # Virtual MA group: play only an unambiguous equivalent through MA.
+        media = resolve_group_sonos_favorite(entry)
+        client.command("player_queues/play_media", queue_id=queue_id, media=media)
+        NATIVE_SONOS_SESSIONS.discard(queue_id)
+        return
+    coordinator = getattr(getattr(speaker, "group", None), "coordinator", None)
+    speaker = coordinator or speaker
     play_sonos_favorite(speaker, entry)
     NATIVE_SONOS_SESSIONS.add(queue_id)
 
