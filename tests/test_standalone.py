@@ -924,3 +924,32 @@ def test_server_exits_cleanly_on_supervisor_sigterm():
         if process.poll() is None:
             process.kill()
             process.communicate(timeout=5)
+
+
+def test_normalize_item_preserves_provider_mappings_for_favorites():
+    item = {
+        "uri": "library://album/1",
+        "name": "Album",
+        "provider_mappings": [
+            {"provider_instance": "apple_music--account"},
+            {"provider_domain": "spotify"},
+        ],
+    }
+    result = standalone.normalize_item(item)
+    assert result["providers"] == ["apple_music", "spotify"]
+
+
+def test_search_returns_separate_artist_album_and_track_collections(monkeypatch):
+    def fake_command(command, **kwargs):
+        assert command == "music/search"
+        assert set(kwargs["media_types"]) == {"artist", "album", "track", "playlist", "radio"}
+        return {
+            "artists": [{"uri": "apple_music://artist/1", "name": "Ed Sheeran"}],
+            "albums": [{"uri": "apple_music://album/2", "name": "Divide"}],
+            "tracks": [{"uri": "apple_music://track/3", "name": "Shape of You"}],
+        }
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    result = standalone.search("Ed Sheeran", provider="apple")
+    assert [item["name"] for item in result["artists"]] == ["Ed Sheeran"]
+    assert [item["name"] for item in result["albums"]] == ["Divide"]
+    assert [item["name"] for item in result["tracks"]] == ["Shape of You"]
