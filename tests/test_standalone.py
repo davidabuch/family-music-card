@@ -974,6 +974,7 @@ def test_group_sonos_favorite_resolves_single_exact_catalog_match(monkeypatch):
 
 def test_group_sonos_favorite_rejects_ambiguous_matches(monkeypatch):
     from types import SimpleNamespace
+
     import pytest
     monkeypatch.setattr(
         standalone.client, "command",
@@ -990,6 +991,7 @@ def test_group_sonos_favorite_rejects_ambiguous_matches(monkeypatch):
 
 def test_group_sonos_favorite_never_guesses_when_missing(monkeypatch):
     from types import SimpleNamespace
+
     import pytest
     monkeypatch.setattr(standalone.client, "command", lambda *args, **kwargs: {})
     with pytest.raises(ValueError, match="cannot be resolved uniquely"):
