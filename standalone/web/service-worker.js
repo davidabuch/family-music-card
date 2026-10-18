@@ -1,4 +1,4 @@
-const CACHE="family-music-approved-icons-v2-search-favorites-v0.2.39";
+const CACHE="family-music-approved-icons-v2-search-favorites-v0.2.40";
 const ASSETS=["/","/styles.css","/app.js","/manifest.webmanifest","/icons/approved-v2/icon-16.png","/icons/approved-v2/icon-32.png","/icons/approved-v2/icon-180.png","/icons/approved-v2/icon-192.png","/icons/approved-v2/icon-512.png","/favicon.ico","/apple-touch-icon.png?v=approved-v2","/apple-touch-icon-precomposed.png?v=approved-v2"];
 self.addEventListener("install",(event)=>event.waitUntil(caches.open(CACHE).then((cache)=>cache.addAll(ASSETS))));
 self.addEventListener("activate",(event)=>event.waitUntil(caches.keys().then((keys)=>Promise.all(keys.filter((key)=>key!==CACHE).map((key)=>caches.delete(key))))));
