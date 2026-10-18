@@ -12,6 +12,7 @@ import os
 import secrets
 import signal
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,11 @@ MAX_MA_RESPONSE_BYTES = 8 * 1024 * 1024
 REQUEST_TIMEOUT_SECONDS = 15
 MAX_CONCURRENT_REQUESTS = 6
 API_REQUEST_SLOTS = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+ARTWORK_CACHE_TTL = 3600
+ARTWORK_CACHE_MAX_BYTES = 24 * 1024 * 1024
+ARTWORK_CACHE: dict[str, tuple[float, str, bytes]] = {}
+ARTWORK_CACHE_LOCK = threading.Lock()
+
 
 PLAYER_ALLOWLIST = {
     item.strip()
@@ -840,6 +846,23 @@ class Handler(BaseHTTPRequestHandler):
                 return
             origin = f"http://{host}:1400"
             headers = {}
+        cache_key = origin + path
+        now = time.monotonic()
+        with ARTWORK_CACHE_LOCK:
+            cached = ARTWORK_CACHE.get(cache_key)
+            if cached and cached[0] > now:
+                content_type, content = cached[1], cached[2]
+            else:
+                cached = None
+        if cached is not None:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "private, max-age=3600")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Content-Length", str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+            return
         request = urllib.request.Request(origin + path, headers=headers)
         try:
             with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
@@ -859,9 +882,22 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "artwork unavailable"}, HTTPStatus.BAD_GATEWAY)
             return
 
+        with ARTWORK_CACHE_LOCK:
+            # Evict expired entries first, then oldest entries to bound memory.
+            for key, entry in list(ARTWORK_CACHE.items()):
+                if entry[0] <= now:
+                    del ARTWORK_CACHE[key]
+            while (
+                ARTWORK_CACHE
+                and sum(len(entry[2]) for entry in ARTWORK_CACHE.values()) + len(content)
+                > ARTWORK_CACHE_MAX_BYTES
+            ):
+                del ARTWORK_CACHE[next(iter(ARTWORK_CACHE))]
+            if len(content) <= ARTWORK_CACHE_MAX_BYTES:
+                ARTWORK_CACHE[cache_key] = (now + ARTWORK_CACHE_TTL, content_type, content)
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "private, max-age=300")
+        self.send_header("Cache-Control", "private, max-age=3600")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()

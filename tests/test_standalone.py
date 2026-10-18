@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.42"' in app_config
+    assert 'version: "0.2.43"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1045,3 +1045,9 @@ def test_favorites_include_saved_provider_playlists_without_changing_flags(monke
     assert items[1]["saved_library"] is True
     assert items[1]["favorite"] is False
     assert items[2]["saved_library"] is True
+
+
+def test_artwork_cache_is_bounded_and_private():
+    assert standalone.ARTWORK_CACHE_MAX_BYTES == 24 * 1024 * 1024
+    assert standalone.ARTWORK_CACHE_TTL == 3600
+    assert isinstance(standalone.ARTWORK_CACHE_LOCK, type(__import__("threading").Lock()))
