@@ -442,6 +442,21 @@ function findItem(uri, collections) {
 }
 
 function wirePlayable(container, collections) {
+  // Artwork proxy requests can be temporarily rejected during a large grid load.
+  // Retry failed images with bounded backoff instead of leaving blank tiles.
+  container.querySelectorAll(".playable img").forEach((img) => {
+    let attempts = 0;
+    const original = img.getAttribute("src");
+    if (!original?.startsWith("/api/artwork?")) return;
+    img.addEventListener("error", () => {
+      if (++attempts > 3 || !img.isConnected) return;
+      setTimeout(() => {
+        if (!img.isConnected) return;
+        const separator = original.includes("?") ? "&" : "?";
+        img.src = original + separator + "retry=" + attempts;
+      }, 750 * attempts * attempts);
+    });
+  });
   container.querySelectorAll(".playable").forEach((button) => {
     button.addEventListener("click", async () => {
       const item = findItem(button.dataset.uri, collections);
