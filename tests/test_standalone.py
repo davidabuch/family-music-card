@@ -953,3 +953,46 @@ def test_search_returns_separate_artist_album_and_track_collections(monkeypatch)
     assert [item["name"] for item in result["artists"]] == ["Ed Sheeran"]
     assert [item["name"] for item in result["albums"]] == ["Divide"]
     assert [item["name"] for item in result["tracks"]] == ["Shape of You"]
+
+
+def test_group_sonos_favorite_resolves_single_exact_catalog_match(monkeypatch):
+    from types import SimpleNamespace
+    calls = []
+    def fake_command(command, **kwargs):
+        calls.append((command, kwargs))
+        return {"albums": [
+            {"name": "Exact Album", "uri": "apple_music://album/7"},
+            {"name": "Exact Album Deluxe", "uri": "spotify://album/8"},
+        ]}
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    uri = standalone.resolve_group_sonos_favorite(
+        SimpleNamespace(title="Exact Album", item_class="object.container.album.musicAlbum")
+    )
+    assert uri == "apple_music://album/7"
+    assert calls[0][1]["media_types"] == ["album"]
+
+
+def test_group_sonos_favorite_rejects_ambiguous_matches(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    monkeypatch.setattr(
+        standalone.client, "command",
+        lambda *args, **kwargs: {"tracks": [
+            {"name": "Same Song", "uri": "spotify://track/1"},
+            {"name": "Same Song", "uri": "apple_music://track/2"},
+        ]},
+    )
+    with pytest.raises(ValueError, match="cannot be resolved uniquely"):
+        standalone.resolve_group_sonos_favorite(
+            SimpleNamespace(title="Same Song", item_class="object.item.audioItem.musicTrack")
+        )
+
+
+def test_group_sonos_favorite_never_guesses_when_missing(monkeypatch):
+    from types import SimpleNamespace
+    import pytest
+    monkeypatch.setattr(standalone.client, "command", lambda *args, **kwargs: {})
+    with pytest.raises(ValueError, match="cannot be resolved uniquely"):
+        standalone.resolve_group_sonos_favorite(
+            SimpleNamespace(title="Missing", item_class="object.item.audioItem.musicTrack")
+        )
