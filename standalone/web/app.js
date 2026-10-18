@@ -484,12 +484,12 @@ async function playItem(item, button) {
 
 function renderSections(target, data) {
   const sections = [
-    ["Sonos Favorites", data.sonos_favorites],
     ["Artists", data.artists],
     ["Albums", data.albums],
     ["Tracks", data.tracks],
     ["Playlists", data.playlists],
     ["Radio", data.radio],
+    ["Sonos Favorites", data.sonos_favorites],
   ].filter(([, items]) => Array.isArray(items) && items.length);
   if (!sections.length) {
     target.innerHTML = '<div class="empty">Nothing here yet.</div>';
