@@ -408,6 +408,7 @@ function itemSubtitle(item) {
   const artists = Array.isArray(item?.artists)
     ? item.artists.map((artist) => artist?.name).filter(Boolean).join(", ")
     : "";
+  if (item?.saved_library) return "Saved playlist · " + (providerOf(item) === "spotify" ? "Spotify" : "Apple Music");
   return artists || item?.album?.name || item?.media_type || "";
 }
 
