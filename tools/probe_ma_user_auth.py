@@ -58,6 +58,12 @@ def main():
         items = response.get("result") if isinstance(response, dict) else None
         print(command, "HTTP:", status, "items:", len(items) if isinstance(items, list) else "unknown",
               "error:", bool(response.get("error")) if isinstance(response, dict) else True)
+        if command == "players/all" and isinstance(items, list):
+            forbidden = [p for p in items if isinstance(p, dict) and
+                         "master bedroom" in str(p.get("name", "")).lower()]
+            print("Master Bedroom visible to Kaelah:", bool(forbidden))
+            if forbidden:
+                raise SystemExit("SECURITY FAIL: restricted Master Bedroom exposed")
 
 
 if __name__ == "__main__":
