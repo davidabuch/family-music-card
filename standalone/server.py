@@ -156,6 +156,10 @@ def normalize_item(item: Any) -> dict[str, Any]:
     })
     if providers:
         result["providers"] = providers
+    instances = sorted({str(m.get("provider_instance")) for m in mappings
+                        if isinstance(m, dict) and m.get("provider_instance")})
+    if instances:
+        result["provider_instances"] = instances
     artists = item.get("artists")
     if isinstance(artists, list):
         result["artists"] = [
@@ -663,6 +667,13 @@ def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
     return result
 
 
+def _visible_playlist(item: dict[str, Any]) -> bool:
+    """Exclude only explicitly configured source instances; fail open for unknown mappings."""
+    excluded = {x.strip() for x in os.environ.get("FAMILY_MUSIC_EXCLUDED_PLAYLIST_INSTANCES", "").split(",") if x.strip()}
+    instances = set(item.get("provider_instances", []))
+    return not (excluded and instances and instances.issubset(excluded))
+
+
 def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     commands = {
         "artists": "music/artists/library_items",
@@ -681,7 +692,9 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
             order_by="sort_name",
             summary=False,
         )
-        result[key] = [normalize_item(item) for item in raw if isinstance(item, dict)]
+        result[key] = [normalized for item in raw if isinstance(item, dict)
+                       for normalized in [normalize_item(item)]
+                       if key != "playlists" or _visible_playlist(normalized)]
     # MA may import saved Apple Music/Spotify playlists without marking them
     # as MA favorites. Show them as saved library items without changing flags.
     saved = client.command(
@@ -696,7 +709,7 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
         if not isinstance(item, dict):
             continue
         normalized = normalize_item(item)
-        if (normalized.get("uri") not in known
+        if (_visible_playlist(normalized) and normalized.get("uri") not in known
                 and set(normalized.get("providers", [])) & {"apple_music", "spotify"}):
             normalized["saved_library"] = True
             result["playlists"].append(normalized)
