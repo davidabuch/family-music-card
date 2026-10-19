@@ -1,5 +1,5 @@
 name: Family Music
-version: "0.2.47"
+version: "0.2.48"
 slug: family_music
 description: Standalone Family Music PWA backed directly by Music Assistant.
 url: https://github.com/davidabuch/family-music-card
@@ -17,7 +17,9 @@ options:
   ma_url: http://127.0.0.1:8095
   ma_token: null
   player_ids: ""
+  excluded_playlist_instances: ""
 schema:
   ma_url: url
   ma_token: password
   player_ids: str
+  excluded_playlist_instances: str
