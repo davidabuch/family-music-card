@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.47"' in app_config
+    assert 'version: "0.2.48"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1071,3 +1071,14 @@ def test_artwork_burst_waits_for_available_request_slot(monkeypatch):
     handler.path = "/api/state"
     assert handler._acquire_request_slot()
     assert semaphore.waits[-1] == {"timeout": 2}
+
+
+def test_playlist_exclusion_uses_exact_instance_and_preserves_shared_mappings(monkeypatch):
+    monkeypatch.setenv("FAMILY_MUSIC_EXCLUDED_PLAYLIST_INSTANCES", "spotify--kaelah")
+    def mapping(*instances):
+        return {"provider_mappings": [{"provider_instance": x} for x in instances]}
+    assert not standalone._visible_playlist(standalone.normalize_item(mapping("spotify--kaelah")))
+    assert standalone._visible_playlist(standalone.normalize_item(mapping("spotify--david")))
+    shared = standalone.normalize_item(mapping("spotify--kaelah", "apple_music--david"))
+    assert standalone._visible_playlist(shared)
+    assert standalone._visible_playlist(standalone.normalize_item({}))
