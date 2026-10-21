@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.48"' in app_config
+    assert 'version: "0.2.49"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1082,3 +1082,11 @@ def test_playlist_exclusion_uses_exact_instance_and_preserves_shared_mappings(mo
     shared = standalone.normalize_item(mapping("spotify--kaelah", "apple_music--david"))
     assert standalone._visible_playlist(shared)
     assert standalone._visible_playlist(standalone.normalize_item({}))
+
+
+def test_addon_startup_script_shell_syntax():
+    import subprocess
+
+    result = subprocess.run(["sh", "-n", str(ROOT / "standalone" / "run.sh")],
+                            capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr
