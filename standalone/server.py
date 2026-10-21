@@ -669,7 +669,8 @@ def merge_sonos_favorites(result: dict[str, list[dict[str, Any]]],
 
 def _visible_playlist(item: dict[str, Any]) -> bool:
     """Exclude only explicitly configured source instances; fail open for unknown mappings."""
-    excluded = {x.strip() for x in os.environ.get("FAMILY_MUSIC_EXCLUDED_PLAYLIST_INSTANCES", "").split(",") if x.strip()}
+    configured = os.environ.get("FAMILY_MUSIC_EXCLUDED_PLAYLIST_INSTANCES", "")
+    excluded = {value.strip() for value in configured.split(",") if value.strip()}
     instances = set(item.get("provider_instances", []))
     return not (excluded and instances and instances.issubset(excluded))
 
