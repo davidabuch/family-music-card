@@ -1079,5 +1079,6 @@ def test_playlist_exclusion_uses_exact_instance_and_preserves_shared_mappings(mo
         return {"provider_mappings": [{"provider_instance": x} for x in instances]}
     assert not standalone._visible_playlist(standalone.normalize_item(mapping("spotify--kaelah")))
     assert standalone._visible_playlist(standalone.normalize_item(mapping("spotify--david")))
-    assert standalone._visible_playlist(standalone.normalize_item(mapping("spotify--kaelah", "apple_music--david")))
+    shared = standalone.normalize_item(mapping("spotify--kaelah", "apple_music--david"))
+    assert standalone._visible_playlist(shared)
     assert standalone._visible_playlist(standalone.normalize_item({}))
