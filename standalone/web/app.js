@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.58";
+const APP_VERSION = "0.2.59";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -7,6 +7,8 @@ const state = {
   view: "now",
   provider: "all",
   searchType: "albums",
+  searchProfile: localStorage.getItem("family-music-search-profile") || "all",
+  searchRequestId: 0,
   searchResults: null,
   artistFilter: null,
   favoritesProvider: "all",
@@ -850,13 +852,15 @@ async function runSearch() {
   if (!query) return;
   if (state.artistFilter && query.toLocaleLowerCase() !== state.artistFilter.toLocaleLowerCase()) state.artistFilter = null;
   const body = $("#searchBody");
+  const requestId = ++state.searchRequestId;
   body.innerHTML = '<div class="empty">Searching…</div>';
   try {
-    const data = await api(`/api/search?q=${encodeURIComponent(query)}&provider=${encodeURIComponent(state.provider)}`);
+    const data = await api(`/api/search?q=${encodeURIComponent(query)}&provider=${encodeURIComponent(state.provider)}&profile=${encodeURIComponent(state.searchProfile)}`);
+    if (requestId !== state.searchRequestId) return;
     state.searchResults = data;
     showSearchResults();
   } catch (error) {
-    body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+    if (requestId === state.searchRequestId) body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -1392,6 +1396,21 @@ function startVoiceSearch() {
 function wire() {
   document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
+  document.querySelectorAll(".search-profile").forEach((button)=>{
+    const active = button.dataset.searchProfile === state.searchProfile;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", String(active));
+    button.addEventListener("click",()=>{
+      state.searchProfile = button.dataset.searchProfile;
+      localStorage.setItem("family-music-search-profile", state.searchProfile);
+      document.querySelectorAll(".search-profile").forEach((node)=>{
+        node.classList.toggle("active", node === button);
+        node.setAttribute("aria-pressed", String(node === button));
+      });
+      state.searchResults = null;
+      if ($("#searchInput").value.trim()) runSearch();
+    });
+  });
   document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});if(state.searchResults)runSearch();}));
   document.querySelectorAll(".search-type").forEach((button)=>button.addEventListener("click",()=>{state.searchType=button.dataset.type;if(state.searchType!=="albums")state.artistFilter=null;syncSearchType();if(state.searchResults)showSearchResults();}));
   document.querySelectorAll(".favorite-profile").forEach((button)=>{
