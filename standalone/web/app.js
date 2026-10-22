@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.60";
+const APP_VERSION = "0.2.61";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -995,10 +995,15 @@ async function toggleMute() {
 }
 
 async function queueControl(action, value) {
-  const qid = queueId();
-  if (!qid) return;
+  const player = selectedPlayer();
   const queue = selectedQueue();
-  const maActive = maQueueActive(queue);
+  const maActive = maQueueActive(queue, player);
+  const qid = maActive ? queue?.queue_id : player?.player_id;
+  if (!qid) return;
+  if (!maActive && !(isPhysicalSonos(player) && state.nativeModesPlayerId === player.player_id && state.nativeModes?.available)) {
+    showToast("Shuffle and repeat unavailable for this source", 3000);
+    return;
+  }
   const endpoint = maActive ? "/api/queue-control" : "/api/native-mode-control";
   try {
     await api(endpoint, {method:"POST", body:JSON.stringify({queue_id:qid, action, value})});
@@ -1010,14 +1015,14 @@ async function queueControl(action, value) {
 
 function toggleShuffle() {
   const queue = selectedQueue();
-  const maActive = queue && ["playing", "paused"].includes(queue.state);
+  const maActive = maQueueActive(queue, selectedPlayer());
   const current = maActive ? Boolean(queue.shuffle_enabled) : Boolean(state.nativeModes?.shuffle);
   queueControl("shuffle", !current);
 }
 
 function toggleRepeat() {
   const queue = selectedQueue();
-  const maActive = queue && ["playing", "paused"].includes(queue.state);
+  const maActive = maQueueActive(queue, selectedPlayer());
   const current = maActive ? queue.repeat_mode || "off" : state.nativeModes?.repeat || "off";
   const next = current === "off" ? "one" : current === "one" ? "all" : "off";
   queueControl("repeat", next);
