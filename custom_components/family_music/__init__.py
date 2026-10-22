@@ -526,11 +526,6 @@ async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
     if not player_id:
         connection.send_result(msg["id"], {"available": False, "speakers": []})
         return
-    member_entity = _ma_entity_for_player(registry, msg["member_player_id"])
-    if not member_entity or not _require_entity_permission(
-        connection, msg, member_entity, control=True
-    ):
-        return
     mass = get_music_assistant_client(hass, msg["config_entry_id"])
     raw = await mass.send_command("players/all")
     players = (
