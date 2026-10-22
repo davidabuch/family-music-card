@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.59"
+APP_VERSION = "0.2.60"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -874,6 +874,14 @@ FAVORITE_ACCOUNT_INSTANCES = {
 }
 
 
+def _unambiguous_personal_track(item: dict[str, Any], instance: str) -> bool:
+    """Do not attribute globally favorited tracks shared across family accounts."""
+    mappings = item.get("provider_instances", [])
+    same_service = [value for value in mappings
+                    if value.split("--")[0] == instance.split("--")[0]]
+    return instance in same_service and len(same_service) == 1
+
+
 def account_favorites(profile: str, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     """Fetch actual provider-scoped favorites, not inferred cross-account mappings."""
     if profile not in FAVORITE_ACCOUNT_INSTANCES:
@@ -897,6 +905,8 @@ def account_favorites(profile: str, limit: int = 40) -> dict[str, list[dict[str,
                 if not isinstance(item, dict):
                     continue
                 normalized = normalize_item(item)
+                if kind == "tracks" and not _unambiguous_personal_track(normalized, instance):
+                    continue
                 if kind == "playlists" and not _visible_playlist(normalized):
                     continue
                 normalized["favorite_source"] = source

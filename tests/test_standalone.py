@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.59"' in app_config
+    assert 'version: "0.2.60"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1185,7 +1185,8 @@ def test_personal_favorites_use_only_own_provider_queries(monkeypatch):
     def fake_command(command, **kwargs):
         calls.append((command, kwargs))
         return [{"uri": f"library://{kwargs['provider']}/{command}",
-                 "name": "Account favorite", "favorite": True}]
+                 "name": "Account favorite", "favorite": True,
+                 "provider_mappings": [{"provider_instance": kwargs["provider"]}]}]
 
     monkeypatch.setattr(standalone.client, "command", fake_command)
     monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [])
@@ -1240,3 +1241,21 @@ def test_search_rejects_unknown_profiles_and_providers():
         standalone.search("test", profile="unknown")
     with pytest.raises(ValueError):
         standalone.search("test", provider="unknown")
+
+
+def test_personal_favorite_track_rejects_ambiguous_same_service_mapping():
+    assert not standalone._unambiguous_personal_track(
+        {"provider_instances": ["apple_music--qpuX24cG", "apple_music--ydAVUe7w"]},
+        "apple_music--qpuX24cG",
+    )
+    assert not standalone._unambiguous_personal_track(
+        {"provider_instances": ["spotify--Q5Eakxzw", "spotify--ooVGVwHn"]},
+        "spotify--Q5Eakxzw",
+    )
+    assert standalone._unambiguous_personal_track(
+        {"provider_instances": ["apple_music--qpuX24cG", "spotify--ooVGVwHn"]},
+        "apple_music--qpuX24cG",
+    )
+    assert not standalone._unambiguous_personal_track(
+        {"provider_instances": []}, "apple_music--qpuX24cG",
+    )
