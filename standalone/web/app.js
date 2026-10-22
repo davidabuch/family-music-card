@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.55";
+const APP_VERSION = "0.2.56";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -245,6 +245,62 @@ function setView(view) {
     }
   }
   if (view === "recents") loadRecents();
+  if (view === "wholehouse") renderWholeHouse();
+}
+
+// Read-only household overview: group members never become duplicate sessions.
+function wholeHouseSessions() {
+  const active = [], idle = [], seen = new Set();
+  for (const player of state.players) {
+    if (!isPhysicalSonos(player) && player.type !== "group") continue;
+    if (player.available === false) continue;
+    const leader = playbackPlayer(player);
+    if (!leader) continue;
+    const id = leader.player_id;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const members = state.players.filter(p => p.player_id === id ||
+      (p.synced_to === id && isPhysicalSonos(p)));
+    const label = members.length > 1 ? members.map(playerName).join(" + ") : playerName(leader);
+    const playback = observedPlayback(leader);
+    const queue = state.queues.find(q => q.queue_id === id || q.queue_id === leader.active_source);
+    const queueActive = maQueueActive(queue, leader) && queue?.state === playback;
+    const media = queueActive ? (queue?.current_item || leader.current_media) :
+      (leader.current_media || queue?.current_item);
+    const session = {id, label, playback, media, volume: leader.volume_level};
+    (playback === "playing" ? active : idle).push(session);
+  }
+  return {active, idle};
+}
+
+function wholeHouseMarkup(session) {
+  const art = mediaImage(session.media);
+  return `<button class="whole-house-session" type="button" data-house-player="${escapeHtml(session.id)}">
+    <span class="whole-house-art">${art ? `<img src="${escapeHtml(art)}" alt="">` : "♫"}</span>
+    <span class="whole-house-copy"><strong>${escapeHtml(session.label)}</strong>
+      <span>${escapeHtml(session.playback === "playing" ? mediaName(session.media) : "Not playing")}</span>
+      <small>${escapeHtml(session.playback === "playing" ? mediaArtist(session.media) : "Tap to select")}</small></span>
+    <span class="whole-house-chevron">›</span></button>`;
+}
+
+function renderWholeHouse() {
+  const body = $("#wholeHouseBody");
+  if (!body || state.view !== "wholehouse") return;
+  const {active, idle} = wholeHouseSessions();
+  const expanded = body.querySelector("#idleRooms")?.open || false;
+  body.innerHTML = `<p class="whole-house-summary">${active.length} active music ${active.length === 1 ? "session" : "sessions"}</p>
+    <div class="whole-house-list">${active.length ? active.map(wholeHouseMarkup).join("") :
+      '<p class="whole-house-empty">No Sonos rooms are currently playing.</p>'}</div>
+    <details id="idleRooms" ${expanded ? "open" : ""}><summary>Other Rooms (${idle.length})</summary>
+      <div class="whole-house-list">${idle.map(wholeHouseMarkup).join("")}</div></details>`;
+  body.querySelectorAll("[data-house-player]").forEach(button => button.addEventListener("click", () => {
+    const id = button.dataset.housePlayer;
+    if (!state.players.some(player => player.player_id === id)) return;
+    state.selectedPlayerId = id;
+    localStorage.setItem("family-music-player-id", id);
+    setView("now");
+    renderNow();
+  }));
 }
 
 function renderPlayerSelect() {
@@ -444,6 +500,7 @@ async function refreshState({afterCurrent = false} = {}) {
         }
       }
       renderNow();
+      renderWholeHouse();
       const player = selectedPlayer();
       const observation = {selected: state.selectedPlayerId, playback: observedPlayback(),
         playerState: player?.state ?? null, queueState: selectedQueue()?.state ?? null,
