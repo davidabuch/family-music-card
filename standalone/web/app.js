@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.53";
+const APP_VERSION = "0.2.54";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -644,10 +644,11 @@ const SPOTIFY_PROFILES = Object.freeze({
   kaelah: "spotify--ooVGVwHn",
 });
 
-function filterFavoriteProfile(data, profile) {
+function filterFavoriteProfile(data, profile, provider = "all") {
   if (profile === "all") return data;
   const instance = SPOTIFY_PROFILES[profile];
   if (!instance) return data;
+  // Only David\'s Apple Music account is configured in Music Assistant.\n  // Filter by selected service first, so cross-service provider mappings on\n  // merged MA library items cannot misattribute Apple Music to Kaelah.\n  if (provider === "apple") return profile === "david" ? data : Object.fromEntries(\n    Object.entries(data || {}).map(([kind]) => [kind, []]));
   // MA provider mappings identify playable sources, not the Spotify account's
   // saved-library membership. David's Spotify library was verified against the
   // owner's Spotify screenshot on 2026-10-22. Prefer exact library item IDs.
@@ -681,7 +682,7 @@ function showFavorites(force = true) {
   if (!state.favoritesResults) return;
   // Keep existing image nodes intact when merely returning to this tab.
   if (!force && body.querySelector(".media-item, .recent-item")) return;
-  renderSections(body, filterFavoriteProvider(filterFavoriteProfile(state.favoritesResults, state.favoritesProfile), state.favoritesProvider));
+  renderSections(body, filterFavoriteProfile(filterFavoriteProvider(state.favoritesResults, state.favoritesProvider), state.favoritesProfile, state.favoritesProvider));
 }
 
 async function loadFavorites() {
