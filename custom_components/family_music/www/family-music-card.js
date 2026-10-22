@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.22";
+const CARD_VERSION = "0.3.24";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -1226,22 +1226,49 @@ class FamilyMusicCard extends HTMLElement {
     return pending.value;
   }
 
-  _skipTrack(direction) {
+  async _resolveTransportTarget(selectedPlayer) {
+    if (!selectedPlayer || !this._hass?.states?.[selectedPlayer]) {
+      throw new Error("Selected speaker is unavailable");
+    }
+    if (this._hass.states[selectedPlayer].attributes?.mass_player_type === "group") {
+      return selectedPlayer;
+    }
+    // Query current Sonos coordinator for EVERY command, not the cached group UI.
+    const topology = await this._ws("family_music/group_topology", {
+      player_entity_id: selectedPlayer,
+    });
+    if (!topology?.available || !Array.isArray(topology.speakers)) {
+      throw new Error("Cannot verify current Sonos group coordinator");
+    }
+    const selected = topology.speakers.find((p) => p.entity_id === selectedPlayer);
+    const leader = topology.speakers.find(
+      (p) => p.coordinator && p.player_id === topology.leader_id
+    );
+    if (!selected?.member || !leader?.member || !leader.available ||
+        !leader.entity_id || !this._hass.states[leader.entity_id]) {
+      throw new Error("Sonos group coordinator is unavailable or inconsistent");
+    }
+    return this._nativePlayerPeers?.[leader.entity_id] || leader.entity_id;
+  }
+
+  async _skipTrack(direction) {
     if (!this._selectedPlayer || !this._hass) return;
+    const selected = this._selectedPlayer;
     const buttonId = direction === "next" ? "next" : "prev";
     const service = direction === "next" ? "media_next_track" : "media_previous_track";
-    const target = this._nativePlayerPeers?.[this._selectedPlayer] || this._selectedPlayer;
     const button = this.shadowRoot.getElementById(buttonId);
-    button?.classList.add("accepted");
     button?.setAttribute("aria-busy", "true");
-    window.setTimeout(() => {
-      button?.classList.remove("accepted");
+    try {
+      const target = await this._resolveTransportTarget(selected);
+      if (this._selectedPlayer !== selected) return;
+      await this._hass.callService("media_player", service, { entity_id: target });
+      button?.classList.add("accepted");
+      window.setTimeout(() => button?.classList.remove("accepted"), 500);
+    } catch (error) {
+      console.error("Family Music group track control failed:", error);
+    } finally {
       button?.removeAttribute("aria-busy");
-    }, 500);
-    this._hass.callService("media_player", service, { entity_id: target }).catch(() => {
-      button?.classList.remove("accepted");
-      button?.removeAttribute("aria-busy");
-    });
+    }
   }
 
   _setVolume(percent, flush = false) {
@@ -1379,15 +1406,22 @@ class FamilyMusicCard extends HTMLElement {
       if (button) {
         button.innerHTML = `<ha-icon icon="${targetState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
       }
-      this._hass.callService(
-        "media_player",
-        targetState === "playing" ? "media_play" : "media_pause",
-        { entity_id: this._selectedPlayer }
-      ).catch(() => {
-        this._optimisticPlayback = null;
-        this._optimisticPlaybackUntil = 0;
-        this._updateNowPlaying();
-      });
+      const selected = this._selectedPlayer;
+      this._resolveTransportTarget(selected)
+        .then((target) => {
+          if (this._selectedPlayer !== selected) return;
+          return this._hass.callService(
+            "media_player",
+            targetState === "playing" ? "media_play" : "media_pause",
+            { entity_id: target }
+          );
+        })
+        .catch((error) => {
+          console.error("Family Music group playback control failed:", error);
+          this._optimisticPlayback = null;
+          this._optimisticPlaybackUntil = 0;
+          this._updateNowPlaying();
+        });
     });
     const progress = this.shadowRoot.getElementById("trackProgress");
     progress?.addEventListener("input", (event) => {
