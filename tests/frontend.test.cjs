@@ -395,7 +395,7 @@ test('favorites profile separates unique Spotify instances and retains shared it
       {name:'Shared',uri:'library://playlist/116',provider_instances:['spotify--Q5Eakxzw','spotify--ooVGVwHn']},
       {name:'Unknown',provider_instances:[]},
       {name:'Apple',provider_instances:['apple_music--x']}
-    ], sonos_favorites:[{name:'Native Sonos'}]
+    ], sonos_favorites:[{name:'Native Sonos',sonos_favorite:true}]
   }`);
   assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david').playlists"), x=>x.name),
     ['David only']);
