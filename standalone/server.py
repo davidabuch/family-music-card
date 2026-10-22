@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.56"
+APP_VERSION = "0.2.57"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -865,6 +865,41 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
     return result
 
 
+
+def favorite_ownership_diagnostic() -> dict[str, Any]:
+    """Read-only provider-scoped MA probe; never infer ownership from mappings."""
+    instances = {
+        "david": "apple_music--qpuX24cG",
+        "alexis": "apple_music--ydAVUe7w",
+    }
+    result: dict[str, Any] = {"note": "Provider association does not prove favorite ownership.", "accounts": {}}
+    for name, instance in instances.items():
+        account: dict[str, Any] = {}
+        for kind in ("playlists", "tracks", "albums"):
+            try:
+                raw = client.command(
+                    f"music/{kind}/library_items",
+                    provider=instance,
+                    favorite=True,
+                    limit=15,
+                    offset=0,
+                    order_by="sort_name",
+                    summary=False,
+                )
+                items = [normalize_item(item) for item in raw if isinstance(item, dict)]
+                account[kind] = {
+                    "count_sample": len(items),
+                    "items": [{"name": item.get("name"), "uri": item.get("uri"),
+                               "favorite": item.get("favorite"),
+                               "provider_instances": item.get("provider_instances", [])}
+                              for item in items],
+                }
+            except (MAError, ValueError, TypeError) as err:
+                account[kind] = {"error": type(err).__name__, "detail": str(err)[:160]}
+        result["accounts"][name] = account
+    return result
+
+
 def recents(queue_id: str, limit: int = 40) -> list[dict[str, Any]]:
     raw = client.command(
         "music/recently_played_items",
@@ -1176,6 +1211,9 @@ class Handler(BaseHTTPRequestHandler):
                     _require_allowed_destination(queue_id)
                 modes = sonos_playback_modes(queue_id) if queue_id else {"available": False}
                 self._send_json(modes)
+                return
+            if path == "/api/diagnostics/favorite-ownership":
+                self._send_json(favorite_ownership_diagnostic())
                 return
             if path == "/api/favorites":
                 self._send_json(favorites())
