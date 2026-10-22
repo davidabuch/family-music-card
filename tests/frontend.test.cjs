@@ -467,3 +467,18 @@ test('Whole House excludes unconfirmed synced members rather than claiming group
   assert.equal(run('wholeHouseSessions().active[0].label'), 'Kitchen');
   assert.equal(run('state.commandCount'), 0);
 });
+
+test('Whole House shows active permanent MA group once instead of duplicate Sonos rooms', () => {
+  const {run} = standalone();
+  run(`state.players = [
+    {player_id:'syncgroup_main',name:'Main Area',provider:'sync_group',type:'group',
+      available:true,state:'playing',group_members:['RINCON_A','RINCON_B']},
+    {player_id:'RINCON_A',name:'Kitchen',provider:'sonos',type:'player',available:true,state:'playing'},
+    {player_id:'RINCON_B',name:'Living',provider:'sonos',type:'player',available:true,state:'playing'},
+    {player_id:'syncgroup_party',name:'Party',provider:'sync_group',type:'group',
+      available:true,state:'idle',group_members:['RINCON_A','RINCON_B']}
+  ];state.stateAvailable=true`);
+  assert.equal(run('wholeHouseSessions().active.length'), 1);
+  assert.equal(run('wholeHouseSessions().active[0].id'), 'syncgroup_main');
+  assert.equal(run('wholeHouseSessions().idle.length'), 0);
+});
