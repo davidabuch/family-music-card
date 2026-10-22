@@ -11,7 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-IDLE_SECONDS = 60 * 60
+IDLE_SECONDS = 15 * 60
 SETTLE_SECONDS = 60
 MAX_OBSERVATION_GAP = 90
 IDLE_STATES = frozenset({"paused", "idle", "off"})
