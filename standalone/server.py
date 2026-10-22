@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.57"
+APP_VERSION = "0.2.58"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -866,6 +866,65 @@ def favorites(limit: int = 40) -> dict[str, list[dict[str, Any]]]:
 
 
 
+
+FAVORITE_ACCOUNT_INSTANCES = {
+    "david": ("spotify--Q5Eakxzw", "apple_music--qpuX24cG"),
+    "kaelah": ("spotify--ooVGVwHn",),
+    "alexis": ("apple_music--ydAVUe7w",),
+}
+
+
+def account_favorites(profile: str, limit: int = 40) -> dict[str, list[dict[str, Any]]]:
+    """Fetch actual provider-scoped favorites, not inferred cross-account mappings."""
+    if profile not in FAVORITE_ACCOUNT_INSTANCES:
+        raise ValueError("Unknown favorites profile")
+    commands = {
+        "artists": "music/artists/library_items",
+        "albums": "music/albums/library_items",
+        "tracks": "music/tracks/library_items",
+        "playlists": "music/playlists/library_items",
+        "radio": "music/radios/library_items",
+    }
+    result: dict[str, list[dict[str, Any]]] = {key: [] for key in commands}
+    for instance in FAVORITE_ACCOUNT_INSTANCES[profile]:
+        source = "apple" if instance.startswith("apple_music--") else "spotify"
+        for kind, command in commands.items():
+            raw = client.command(
+                command, provider=instance, favorite=True, limit=limit,
+                offset=0, order_by="sort_name", summary=False,
+            )
+            for item in raw if isinstance(raw, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                normalized = normalize_item(item)
+                if kind == "playlists" and not _visible_playlist(normalized):
+                    continue
+                normalized["favorite_source"] = source
+                if not any(existing.get("uri") == normalized.get("uri")
+                           and existing.get("favorite_source") == source
+                           for existing in result[kind]):
+                    result[kind].append(normalized)
+        # Include imported/saved playlists, scoped to the account instance.
+        saved = client.command(
+            "music/playlists/library_items", provider=instance, limit=500,
+            offset=0, order_by="sort_name", summary=False,
+        )
+        for item in saved if isinstance(saved, list) else []:
+            if not isinstance(item, dict):
+                continue
+            normalized = normalize_item(item)
+            if not _visible_playlist(normalized):
+                continue
+            normalized["favorite_source"] = source
+            if not any(existing.get("uri") == normalized.get("uri")
+                       and existing.get("favorite_source") == source
+                       for existing in result["playlists"]):
+                normalized["saved_library"] = True
+                result["playlists"].append(normalized)
+    result["sonos_favorites"] = native_sonos_favorites() if profile == "david" else []
+    return result
+
+
 def favorite_ownership_diagnostic() -> dict[str, Any]:
     """Read-only provider-scoped MA probe; never infer ownership from mappings."""
     instances = {
@@ -1222,7 +1281,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(favorite_ownership_diagnostic())
                 return
             if path == "/api/favorites":
-                self._send_json(favorites())
+                profile = self._query().get("profile", ["all"])[0]
+                self._send_json(favorites() if profile == "all" else account_favorites(profile))
                 return
             if path == "/api/recents":
                 query = self._query()
