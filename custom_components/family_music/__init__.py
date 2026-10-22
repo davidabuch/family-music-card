@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from .const import CARD_PATH, CARD_URL, DOMAIN, VERSION
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _music_assistant_client(hass: HomeAssistant):
@@ -887,6 +890,35 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
     )
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "family_music/client_diagnostic",
+        vol.Required("config_entry_id"): str,
+        vol.Required("phase"): str,
+        vol.Optional("selected"): str,
+        vol.Optional("target"): str,
+        vol.Optional("error"): str,
+        vol.Optional("version"): str,
+    }
+)
+@websocket_api.async_response
+async def ws_client_diagnostic(hass: HomeAssistant, connection, msg: dict) -> None:
+    """Record mobile playback diagnostics in Home Assistant logs."""
+    entry = hass.config_entries.async_get_entry(msg["config_entry_id"])
+    if entry is None or entry.domain not in (DOMAIN, "music_assistant"):
+        connection.send_error(msg["id"], "invalid_entry", "Invalid entry")
+        return
+    selected = msg.get("selected", "")
+    if selected and not _require_entity_permission(connection, msg, selected, control=False):
+        return
+    _LOGGER.warning(
+        "PWA playback: version=%s phase=%s selected=%s target=%s error=%s",
+        msg.get("version", "")[:30], msg["phase"][:60],
+        selected[:120], msg.get("target", "")[:120], msg.get("error", "")[:300],
+    )
+    connection.send_result(msg["id"], {"recorded": True})
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Family Music."""
     if not hass.data.setdefault(DOMAIN, {}).get("registered"):
@@ -895,6 +927,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             [StaticPathConfig(CARD_URL, str(card_path), cache_headers=False)]
         )
         await _async_register_card_resource(hass)
+        websocket_api.async_register_command(hass, ws_client_diagnostic)
         websocket_api.async_register_command(hass, ws_search)
         websocket_api.async_register_command(hass, ws_group_members)
         websocket_api.async_register_command(hass, ws_player_peers)

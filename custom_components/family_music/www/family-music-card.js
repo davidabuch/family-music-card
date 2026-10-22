@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.27";
+const CARD_VERSION = "0.3.28";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -1242,6 +1242,12 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
+  _reportPlaybackDiagnostic(phase, selected, target = "", error = "") {
+    this._ws("family_music/client_diagnostic", {
+      phase, selected, target, error, version: CARD_VERSION,
+    }).catch(() => {});
+  }
+
   async _resolveTransportTarget(selectedPlayer) {
     this._traceTransport("resolve_start", {
       state: this._hass?.states?.[selectedPlayer]?.state,
@@ -1301,6 +1307,7 @@ class FamilyMusicCard extends HTMLElement {
       const target = await this._resolveTransportTarget(selected);
       if (this._selectedPlayer !== selected) return;
       this._traceTransport("service_start", { service, target });
+          this._reportPlaybackDiagnostic("service_start", selected, target);
       await this._hass.callService("media_player", service, { entity_id: target });
       this._traceTransport("service_accepted", { service, target });
       button?.classList.add("accepted");
@@ -1450,6 +1457,7 @@ class FamilyMusicCard extends HTMLElement {
       }
       const selected = this._selectedPlayer;
       this._traceTransport("button_click", { targetState, actualState });
+      this._reportPlaybackDiagnostic("button_click", selected);
       this._resolveTransportTarget(selected)
         .then((target) => {
           if (this._selectedPlayer !== selected) return;
@@ -1461,6 +1469,7 @@ class FamilyMusicCard extends HTMLElement {
         })
         .catch((error) => {
           this._traceTransport("playback_error", { error: String(error) });
+          this._reportPlaybackDiagnostic("playback_error", selected, "", String(error));
           console.error("Family Music group playback control failed:", error);
           this._optimisticPlayback = null;
           this._optimisticPlaybackUntil = 0;
