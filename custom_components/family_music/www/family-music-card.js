@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.24";
+const CARD_VERSION = "0.3.25";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -1248,7 +1248,7 @@ class FamilyMusicCard extends HTMLElement {
         !leader.entity_id || !this._hass.states[leader.entity_id]) {
       throw new Error("Sonos group coordinator is unavailable or inconsistent");
     }
-    return this._nativePlayerPeers?.[leader.entity_id] || leader.entity_id;
+    return leader.entity_id;
   }
 
   async _skipTrack(direction) {
