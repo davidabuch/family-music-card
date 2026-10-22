@@ -872,7 +872,10 @@ def favorite_ownership_diagnostic() -> dict[str, Any]:
         "david": "apple_music--qpuX24cG",
         "alexis": "apple_music--ydAVUe7w",
     }
-    result: dict[str, Any] = {"note": "Provider association does not prove favorite ownership.", "accounts": {}}
+    result: dict[str, Any] = {
+        "note": "Provider association does not prove favorite ownership.",
+        "accounts": {},
+    }
     for name, instance in instances.items():
         account: dict[str, Any] = {}
         for kind in ("playlists", "tracks", "albums"):
