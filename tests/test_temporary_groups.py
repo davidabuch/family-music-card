@@ -57,27 +57,27 @@ class Rig:
             self.tick()
 
 
-def test_59_minutes_preserves_group_60_cleans_once():
+def test_14_minutes_preserves_group_15_cleans_once():
     rig = Rig()
     rig.join()
-    rig.advance(59 * 60)
+    rig.advance(14 * 60)
     assert rig.commands == []
     rig.advance(60)
     assert rig.commands == ["B"]
     assert all(len(group) == 1 for group in rig.groups.values())
-    rig.advance(3600)
+    rig.advance(900)
     assert rig.commands == ["B"]
 
 
 def test_resume_resets_continuous_idle_period():
     rig = Rig()
     rig.join()
-    rig.advance(3590)
+    rig.advance(890)
     rig.states["B"] = "playing"
     rig.tick()
     rig.states["B"] = "paused"
     rig.tick()
-    rig.advance(3590)
+    rig.advance(890)
     assert not rig.commands
     rig.advance(10)
     assert rig.commands == ["B"]
@@ -89,7 +89,7 @@ def test_resume_resets_continuous_idle_period():
 def test_ambiguous_and_active_states_never_earn_idle_credit(state):
     rig = Rig()
     rig.join()
-    rig.advance(3590)
+    rig.advance(890)
     rig.states["B"] = state
     rig.advance(120)
     assert not rig.commands
@@ -99,7 +99,7 @@ def test_ambiguous_and_active_states_never_earn_idle_credit(state):
 def test_play_request_resets_before_state_catches_up():
     rig = Rig()
     rig.join()
-    rig.advance(3590)
+    rig.advance(890)
     rig.manager.activity({"B"})
     rig.advance(30)
     assert not rig.commands
@@ -108,8 +108,8 @@ def test_play_request_resets_before_state_catches_up():
 def test_playback_resumes_during_revalidation():
     rig = Rig()
     rig.join()
-    rig.advance(3570)
-    rig.now = 3600
+    rig.advance(870)
+    rig.now = 900
     calls = 0
 
     def observe(members):
@@ -128,7 +128,7 @@ def test_coordinator_change_with_exact_members_is_safe():
     rig = Rig()
     rig.join()
     rig.set_group("AB", leader="B")
-    rig.advance(3600)
+    rig.advance(900)
     assert rig.commands == ["A"]
 
 
@@ -156,7 +156,7 @@ def test_unrelated_and_permanent_groups_are_never_adopted():
 def test_restart_drops_authority_and_deadline():
     rig = Rig()
     rig.join()
-    rig.advance(3500)
+    rig.advance(800)
     rig.manager = TemporaryGroups(lambda: rig.now)
     rig.advance(7200)
     assert not rig.commands
@@ -178,8 +178,8 @@ def test_observation_failure_relinquishes_without_mutation():
 def test_cleanup_failure_is_not_retried_and_new_explicit_join_can_rearm():
     rig = Rig()
     rig.join()
-    rig.advance(3570)
-    rig.now = 3600
+    rig.advance(870)
+    rig.now = 900
 
     def failure(member):
         rig.commands.append(member)
@@ -191,7 +191,7 @@ def test_cleanup_failure_is_not_retried_and_new_explicit_join_can_rearm():
     rig.set_group("A")
     rig.set_group("B")
     rig.join()
-    rig.advance(3600)
+    rig.advance(900)
     assert rig.commands == ["B", "B"]
 
 
@@ -199,14 +199,14 @@ def test_multiple_independent_groups():
     rig = Rig("ABCD")
     rig.join("A", "B")
     rig.join("C", "D")
-    rig.advance(3600)
+    rig.advance(900)
     assert rig.commands == ["B", "D"]
 
 
 def test_observation_gap_resets_idle_credit():
     rig = Rig()
     rig.join()
-    rig.advance(3500)
+    rig.advance(800)
     rig.now += 300
     rig.tick()
     assert not rig.commands
@@ -231,7 +231,7 @@ def test_resume_between_cleanup_members_stops_remaining_commands():
         rig.ungroup(member)
         rig.states["A"] = "playing"
 
-    rig.advance(3570)
+    rig.advance(870)
     rig.now += 30
     rig.tick(ungroup=remove_then_resume)
     assert rig.commands == ["B"]
@@ -241,8 +241,8 @@ def test_resume_between_cleanup_members_stops_remaining_commands():
 def test_play_request_during_cleanup_vetoes_command_even_if_state_is_stale():
     rig = Rig()
     rig.join()
-    rig.advance(3570)
-    rig.now = 3600
+    rig.advance(870)
+    rig.now = 900
     count = 0
 
     def observe(members):
@@ -259,8 +259,8 @@ def test_play_request_during_cleanup_vetoes_command_even_if_state_is_stale():
 def test_shutdown_during_revalidation_prevents_command():
     rig = Rig()
     rig.join()
-    rig.advance(3570)
-    rig.now = 3600
+    rig.advance(870)
+    rig.now = 900
     stopped = False
     count = 0
 
@@ -279,7 +279,7 @@ def test_larger_group_cleans_one_member_per_cycle_after_topology_settles():
     rig = Rig("ABC")
     rig.join()
     rig.join("A", "C")
-    rig.advance(3600)
+    rig.advance(900)
     assert rig.commands == ["B"]
     rig.advance(30)
     assert rig.commands == ["B", "C"]
