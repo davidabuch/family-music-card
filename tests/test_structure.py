@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.25"
+    assert manifest["version"] == "0.3.26"
     assert card_path.exists()
 
 
@@ -580,3 +580,12 @@ def test_websocket_speaker_permissions_are_enforced():
     guard_position = mutation.index("member_entity, control=True")
     assert guard_position < mutation.index('"players/cmd/group_many"')
     assert guard_position < mutation.index('"players/cmd/ungroup"')
+
+
+def test_transport_uses_live_ma_group_queue_owner():
+    card = (ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js").read_text()
+    resolver = card.split("async _resolveTransportTarget(selectedPlayer) {", 1)[1].split("async _skipTrack(direction)", 1)[0]
+    assert "group_members" in resolver
+    assert "active_queue" in resolver
+    assert "return coordinator;" in resolver
+    assert "group_topology" not in resolver
