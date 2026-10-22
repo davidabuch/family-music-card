@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.26"
+    assert manifest["version"] == "0.3.27"
     assert card_path.exists()
 
 
@@ -591,3 +591,12 @@ def test_transport_diagnostics_are_read_only():
     assert '_traceTransport("topology_error"' in card
     assert '_traceTransport("service_accepted"' in card
     assert 'sessionStorage.setItem("family-music-transport-trace"' in card
+
+
+def test_ma_client_uses_music_assistant_entry():
+    source = (
+        ROOT / "custom_components" / "family_music" / "__init__.py"
+    ).read_text()
+    assert 'hass.config_entries.async_entries("music_assistant")' in source
+    assert 'return get_music_assistant_client(hass, entries[0].entry_id)' in source
+    assert 'get_music_assistant_client(hass, msg["config_entry_id"])' not in source
