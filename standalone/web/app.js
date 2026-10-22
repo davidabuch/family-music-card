@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.57";
+const APP_VERSION = "0.2.58";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -12,6 +12,7 @@ const state = {
   favoritesProvider: "all",
   favoritesProfile: localStorage.getItem("family-music-favorites-profile") || "all",
   favoritesResults: null,
+  favoritesResultsProfile: null,
   favoritesLoadedAt: 0,
   favoritesLoading: false,
   pendingUri: null,
@@ -691,6 +692,7 @@ function renderSections(target, data) {
 }
 
 function providerOf(item) {
+  if (item?.favorite_source) return item.favorite_source;
   if (item?.sonos_favorite || String(item?.uri || "").startsWith("sonos-favorite://")) return "sonos";
   const providers = item?.providers || [];
   if (providers.includes("apple_music")) return "apple";
@@ -748,28 +750,32 @@ function showFavorites(force = true) {
   if (!state.favoritesResults) return;
   // Keep existing image nodes intact when merely returning to this tab.
   if (!force && body.querySelector(".media-item, .recent-item")) return;
-  renderSections(body, filterFavoriteProfile(filterFavoriteProvider(state.favoritesResults, state.favoritesProvider), state.favoritesProfile, state.favoritesProvider));
+  if (state.favoritesResultsProfile !== state.favoritesProfile) return;
+  renderSections(body, filterFavoriteProvider(state.favoritesResults, state.favoritesProvider));
 }
 
 async function loadFavorites() {
   if (state.favoritesLoading) return;
   state.favoritesLoading = true;
+  const requestedProfile = state.favoritesProfile;
   const body = $("#favoritesBody");
   if (!state.favoritesResults) {
     body.innerHTML = '<div class="empty">Loading favorites…</div>';
   }
   try {
-    const data = await api("/api/favorites");
-    const changed = JSON.stringify(data) !== JSON.stringify(state.favoritesResults);
+    const data = await api(`/api/favorites?profile=${encodeURIComponent(requestedProfile)}`);
+    if (requestedProfile !== state.favoritesProfile) return;
     state.favoritesResults = data;
+    state.favoritesResultsProfile = requestedProfile;
     state.favoritesLoadedAt = Date.now();
-    if (changed) showFavorites();
+    showFavorites();
   } catch (error) {
-    if (!state.favoritesResults) {
+    if (requestedProfile === state.favoritesProfile) {
       body.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
     }
   } finally {
     state.favoritesLoading = false;
+    if (requestedProfile !== state.favoritesProfile) loadFavorites();
   }
 }
 
@@ -1400,7 +1406,10 @@ function wire() {
         n.classList.toggle("active",selected);
         n.setAttribute("aria-pressed",String(selected));
       });
-      showFavorites();
+      state.favoritesResults = null;
+      state.favoritesResultsProfile = null;
+      $("#favoritesBody").innerHTML = '<div class="empty">Loading favorites…</div>';
+      loadFavorites();
     });
   });
   document.querySelectorAll(".favorite-provider").forEach((button)=>button.addEventListener("click",()=>{state.favoritesProvider=button.dataset.favoriteProvider;document.querySelectorAll(".favorite-provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});showFavorites();}));
