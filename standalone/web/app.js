@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.54";
+const APP_VERSION = "0.2.55";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -648,26 +648,24 @@ function filterFavoriteProfile(data, profile, provider = "all") {
   if (profile === "all") return data;
   const instance = SPOTIFY_PROFILES[profile];
   if (!instance) return data;
-  // Only David's Apple Music account is configured in Music Assistant.
-  // Filter by selected service first, so cross-service provider mappings on
-  // merged MA library items cannot misattribute Apple Music to Kaelah.
-  if (provider === "apple") return profile === "david" ? data : Object.fromEntries(
-    Object.entries(data || {}).map(([kind]) => [kind, []]));
-  // MA provider mappings identify playable sources, not the Spotify account's
-  // saved-library membership. David's Spotify library was verified against the
-  // owner's Spotify screenshot on 2026-10-22. Prefer exact library item IDs.
+  // Apple Music has one configured account (David); native Sonos favorites
+  // are shared household favorites. Both belong in David's combined view.
+  // Music Assistant's cross-service provider mappings must never attribute
+  // Apple Music items to Kaelah's Spotify account.
   const davidLibraryPlaylistIds = new Set(["19", "21", "22", "23", "25", "27"]);
   return Object.fromEntries(Object.entries(data || {}).map(([kind, items]) => [kind,
     (items || []).filter((item) => {
-      if (profile === "david" && kind === "playlists") {
-        const id = String(item?.uri || "").match(/^library:\/\/playlist\/(\d+)$/)?.[1];
-        return id ? davidLibraryPlaylistIds.has(id) : false;
+      const source = providerOf(item);
+      if (source === "apple" || source === "sonos") return profile === "david";
+      if (source === "spotify" || source === "library") {
+        if (kind === "playlists") {
+          const id = String(item?.uri || "").match(/^library:\/\/playlist\/(\d+)$/)?.[1];
+          if (id && davidLibraryPlaylistIds.has(id)) return profile === "david";
+          if (profile === "david") return false;
+        }
+        return Array.isArray(item?.provider_instances) && item.provider_instances.includes(instance);
       }
-      if (profile === "kaelah" && kind === "playlists") {
-        const id = String(item?.uri || "").match(/^library:\/\/playlist\/(\d+)$/)?.[1];
-        if (id && davidLibraryPlaylistIds.has(id)) return false;
-      }
-      return Array.isArray(item?.provider_instances) && item.provider_instances.includes(instance);
+      return false;
     }),
   ]));
 }
