@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.62";
+const APP_VERSION = "0.2.63";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
