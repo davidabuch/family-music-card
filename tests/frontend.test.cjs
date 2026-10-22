@@ -385,3 +385,24 @@ test('pointer release preserves final slider intent until change commits it', ()
   assert.equal(run('$("#volume").value'), 25);
   assert.equal(run("state.writtenVolume"), 25);
 });
+
+test('favorites profile separates unique Spotify instances and retains shared items', () => {
+  const {run} = standalone();
+  run(`state.favoritesResults = {
+    playlists: [
+      {name:'David only',provider_instances:['spotify--Q5Eakxzw']},
+      {name:'Kaelah only',provider_instances:['spotify--ooVGVwHn']},
+      {name:'Shared',provider_instances:['spotify--Q5Eakxzw','spotify--ooVGVwHn']},
+      {name:'Unknown',provider_instances:[]},
+      {name:'Apple',provider_instances:['apple_music--x']}
+    ], sonos_favorites:[{name:'Native Sonos'}]
+  }`);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david').playlists"), x=>x.name),
+    ['David only','Shared']);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'kaelah').playlists"), x=>x.name),
+    ['Kaelah only','Shared']);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'david').sonos_favorites.length"), 0);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').playlists.length"), 5);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').sonos_favorites.length"), 1);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'invalid').playlists.length"), 5);
+});

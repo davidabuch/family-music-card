@@ -52,8 +52,10 @@
 #volumeDown, #volumeUp { touch-action: manipulation; }
 
 /* Explicit selection affordance for music type and provider facets. */
-.search-type,.favorite-provider{border:1px solid #ffffff30;border-radius:999px;background:#ffffff10;color:#e9e5e3;padding:10px 14px;font-weight:700;white-space:nowrap;cursor:pointer}
-.search-type.active,.favorite-provider.active,.provider.active{background:#ff375f;color:#fff;border:1px solid #ff9db0;box-shadow:0 0 0 2px #ff375f55;font-weight:900}
-.search-type:focus-visible,.favorite-provider:focus-visible,.provider:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.search-type,.favorite-provider,.favorite-profile{border:1px solid #ffffff30;border-radius:999px;background:#ffffff10;color:#e9e5e3;padding:10px 14px;font-weight:700;white-space:nowrap;cursor:pointer}
+.search-type.active,.favorite-provider.active,.favorite-profile.active,.provider.active{background:#ff375f;color:#fff;border:1px solid #ff9db0;box-shadow:0 0 0 2px #ff375f55;font-weight:900}
+.search-type:focus-visible,.favorite-provider:focus-visible,.favorite-profile:focus-visible,.provider:focus-visible{outline:3px solid #fff;outline-offset:3px}
 
 .app-diagnostics{margin:12px 16px 80px;color:#aaa;font-size:12px}.app-diagnostics pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+
+.favorites-profile-note{font-size:12px;color:#bcb4b1;margin:4px 16px 10px;line-height:1.4}
