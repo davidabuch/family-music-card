@@ -44,3 +44,6 @@ jobs:
 
       - name: Check standalone app syntax
         run: node --check standalone/web/app.js
+
+      - name: Frontend behavior regressions
+        run: node --test tests/frontend.test.cjs

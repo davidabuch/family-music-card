@@ -18,3 +18,9 @@ Development follows the HomeKit Integrations autonomous GitHub + Home Assistant 
 ## Installation status
 
 The project is packaged as a HACS custom repository integration. Release installation and Home Assistant commissioning are performed only after Hassfest, HACS validation, lint, Python compilation, and card syntax checks are green.
+
+## Grouped playback and temporary-group cleanup
+
+See [Issue #98 investigation and commissioning notes](docs/issue-98-investigation.md)
+for the confirmed standalone origin failure, HA-card diagnostics, conservative
+backend ownership policy, restart behavior and physical acceptance checks.

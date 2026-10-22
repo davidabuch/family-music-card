@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.49"' in app_config
+    assert 'version: "0.2.50"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -358,6 +358,7 @@ def test_transport_uses_physical_player_and_native_progress():
     assert 'currentMediaPosition(item, player)' in js
     assert 'item?.elapsed_time_last_updated' in js
     assert 'action == "play" and player and player.get("state") == "idle"' in server
+    assert 'and not player.get("synced_to")' in server
 
 
 def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
@@ -369,6 +370,11 @@ def test_native_previous_unsupported_transition_falls_back_to_ma(monkeypatch):
 
     class Speaker:
         uid = "RINCON_TEST"
+        is_coordinator = True
+
+        @property
+        def group(self):
+            return SimpleNamespace(coordinator=self, members=[self])
 
         def previous(self):
             raise UnsupportedTransition("Transition not available")
@@ -430,6 +436,8 @@ def test_native_previous_uses_physical_position_not_zeroed_media_elapsed(monkeyp
     class Speaker:
         uid = "p1"
         def __init__(self):
+            self.is_coordinator = True
+            self.group = types.SimpleNamespace(coordinator=self, members=[self])
             self.seeks = []
             self.previous_calls = 0
         def get_current_track_info(self):
@@ -601,7 +609,7 @@ def test_dynamic_sonos_grouping_uses_music_assistant_native_group_commands(monke
     )
 
     assert result["accepted"] is True
-    assert calls == [(
+    assert [call for call in calls if call[0] != "players/all"] == [(
         "players/cmd/group_many",
         {
             "target_player": "RINCON_KITCHEN",
@@ -676,7 +684,7 @@ def test_dynamic_grouping_ui_is_optimistic_but_waits_for_authoritative_state():
     assert "Joining…" in js
     assert "Leaving…" in js
     assert "authoritativeGroupMembership" in js
-    assert "Sonos group change was not confirmed" in js
+    assert "Group command outcome unknown" in js
     assert 'provider === "sonos"' in js
     assert ".group-speaker-option.pending" in css
 
@@ -750,7 +758,7 @@ def test_dynamic_group_ui_has_member_balance_and_coordinator_removal():
     assert "Speaker Balance" in js
     assert "without switching speakers" in js
     assert "Current playback · tap to remove" in js
-    assert "selected_player_id" in js
+    assert "state.selectedPlayerId = context.leaderId" in js
     assert "family-music-player-id" in js
     assert ".group-balance-section" in css
 
@@ -759,8 +767,8 @@ def test_dynamic_group_popup_waits_for_authoritative_membership_without_reopen()
     js = (ROOT / "standalone" / "web" / "app.js").read_text()
 
     assert "waitForGroupMembership" in js
-    assert "for (let attempt = 0; attempt < 10; attempt += 1)" in js
-    assert "authoritativeGroupMembership(memberId) === expected" in js
+    assert "while (Date.now() < operation.expiresAt)" in js
+    assert "fresh && reconcileGroupChange(operation)" in js
     assert "if (state.groupOpen) renderGroupOverlay()" in js
 
 

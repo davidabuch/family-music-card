@@ -1,3 +1,12 @@
+## 0.2.50
+
+- Fix grouped native pause/resume by verifying the selected speaker's actual Sonos coordinator.
+- Return correlated JSON for native failures instead of dropping the HTTP origin connection.
+- Reconcile delayed joins/leaves for 30 seconds after acceptance and report unknown outcomes accurately.
+- Clean up only backend-owned temporary Sonos groups after 60 minutes of verified continuous inactivity.
+- Add loaded-version/action diagnostics and advance frontend asset/cache versions.
+- See `docs/issue-98-investigation.md` in the repository for ownership, restart and commissioning limits.
+
 ## 0.2.36
 
 - Enforce configured Family Music destination scope on playback, transport, queue controls, native modes, mute, volume, recents, and returned queues.

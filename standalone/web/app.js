@@ -1,3 +1,5 @@
+const APP_VERSION = "0.2.50";
+const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
   queues: [],
@@ -27,9 +29,21 @@ const state = {
   balanceOpen: false,
   groupOpen: false,
   pendingGroup: null,
+  lastGroupChange: null,
+  actionTrace: [],
+  transportPending: false,
 };
 
 const $ = (selector) => document.querySelector(selector);
+
+async function within(promise, milliseconds) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = window.setTimeout(() => reject(new Error("Response timed out; outcome unknown")), milliseconds);
+    })]);
+  } finally { window.clearTimeout(timer); }
+}
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -38,7 +52,13 @@ async function api(path, options = {}) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data?.error) {
-    throw new Error(data?.error || `Request failed (${response.status})`);
+    const reference = data.request_id || response.headers?.get("X-Family-Music-Request-ID") || "";
+    const error = new Error((data?.error || `HTTP ${response.status}: proxy or non-JSON response`)
+      + (reference ? ` (ref ${reference})` : ""));
+    error.status = response.status;
+    error.requestId = reference;
+    error.outcome = data.outcome || "unknown";
+    throw error;
   }
   return data;
 }
@@ -389,6 +409,9 @@ async function refreshState() {
       }
       renderNow();
       updateDestinationActivity();
+      if (state.lastGroupChange?.outcome === "unknown") {
+        reconcileGroupChange(state.lastGroupChange);
+      }
       updateGroupOverlay();
       void refreshNativeModes();
       return true;
@@ -662,19 +685,39 @@ async function runSearch() {
   }
 }
 
+function traceAction(phase, detail = {}) {
+  const entry = {time: new Date().toISOString(), version: APP_VERSION, phase, ...detail};
+  state.actionTrace = [...state.actionTrace, entry].slice(-30);
+  console.info("[Family Music standalone]", entry);
+  try { sessionStorage.setItem("family-music-action-trace", JSON.stringify(state.actionTrace)); }
+  catch (_) { console.warn("Family Music diagnostic storage unavailable; console trace retained"); }
+  const panel = $("#actionDiagnostics");
+  if (panel) panel.textContent = JSON.stringify(state.actionTrace, null, 2);
+}
+
 async function transport(action, button) {
   const qid = queueId();
-  if (!qid) return;
-  button.classList.add("accepted");
-  window.setTimeout(() => button.classList.remove("accepted"), 450);
+  if (!qid || state.transportPending) return;
+  const requestId = crypto.randomUUID();
+  state.transportPending = true;
+  button.setAttribute("aria-busy", "true");
+  traceAction("transport_start", {requestId, selected: state.selectedPlayerId, queue: qid, action});
   try {
-    await api("/api/transport", {
+    await within(api("/api/transport", {
       method: "POST",
-      body: JSON.stringify({queue_id: qid, action}),
-    });
+      body: JSON.stringify({queue_id: qid, action, request_id: requestId}),
+    }), 15000);
+    traceAction("transport_accepted", {requestId});
+    button.classList.add("accepted");
+    window.setTimeout(() => button.classList.remove("accepted"), 450);
     await refreshState();
   } catch (error) {
-    showToast(error.message, 3000);
+    traceAction("transport_error", {requestId, status: error.status || "network",
+      originReference: error.requestId || "none"});
+    showToast(`${error.message} (action ${requestId})`, 6000);
+  } finally {
+    state.transportPending = false;
+    button.removeAttribute("aria-busy");
   }
 }
 
@@ -863,14 +906,6 @@ function updateGroupOverlay() {
     closeOverlay();
     return;
   }
-  const pending = state.pendingGroup;
-  if (pending) {
-    const confirmed = authoritativeGroupMembership(pending.memberId) === (pending.action === "join");
-    if (confirmed || Date.now() >= pending.expiresAt) {
-      if (!confirmed) showToast("Sonos group change was not confirmed", 3000);
-      state.pendingGroup = null;
-    }
-  }
   document.querySelectorAll(".group-speaker-option[data-member]").forEach((button) => {
     const memberId = button.dataset.member;
     const current = groupButtonState(memberId);
@@ -958,16 +993,46 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-async function waitForGroupMembership(memberId, action) {
-  const expected = action === "join";
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    await refreshState();
-    if (authoritativeGroupMembership(memberId) === expected) {
+function observeGroupChange(operation) {
+  const anchor = state.players.find((p) => p.player_id === operation.anchorId);
+  const member = state.players.find((p) => p.player_id === operation.memberId);
+  const context = sonosGroupContext(anchor);
+  if (!anchor || !member || !context) return null;
+  const leader = state.players.find((p) => p.player_id === context.leaderId);
+  if (!leader || leader.available === false) return null;
+  const listed = context.memberIds.has(operation.memberId);
+  // Require reciprocal topology, not just an old coordinator's member list.
+  const memberLeader = member.synced_to || member.player_id;
+  if (operation.action === "join") {
+    return listed && memberLeader === context.leaderId ? context : null;
+  }
+  return !listed && memberLeader !== context.leaderId ? context : null;
+}
+
+function reconcileGroupChange(operation) {
+  const context = observeGroupChange(operation);
+  if (!context) return false;
+  operation.outcome = "confirmed";
+  if (operation.followSuccessor && state.selectedPlayerId === operation.playerId) {
+    state.selectedPlayerId = context.leaderId;
+    localStorage.setItem("family-music-player-id", state.selectedPlayerId);
+  }
+  traceAction("group_confirmed", {requestId: operation.requestId, leader: context.leaderId});
+  return true;
+}
+
+async function waitForGroupMembership(memberId, action, operation = state.pendingGroup) {
+  if (!operation) return false;
+  while (Date.now() < operation.expiresAt) {
+    let fresh = false;
+    try { fresh = await within(refreshState(), Math.max(1, operation.expiresAt - Date.now())); }
+    catch (_) { break; }
+    if (fresh && reconcileGroupChange(operation)) {
       state.pendingGroup = null;
       if (state.groupOpen) renderGroupOverlay();
       return true;
     }
-    await sleep(180);
+    await sleep(1500);
   }
   return false;
 }
@@ -978,28 +1043,48 @@ async function toggleGroupMember(memberId) {
   if (!player || !context || state.pendingGroup) return;
   const action = context.memberIds.has(memberId) ? "leave" : "join";
   if (action === "leave" && context.memberIds.size <= 1) return;
-  state.pendingGroup = {memberId, action, expiresAt: Date.now() + 7000};
+  const survivors = [...context.memberIds].filter((id) => id !== memberId).sort();
+  const operation = {memberId, action, playerId: player.player_id,
+    anchorId: action === "leave" && memberId === context.leaderId ? survivors[0] : player.player_id,
+    followSuccessor: action === "leave" && memberId === context.leaderId,
+    requestId: crypto.randomUUID(), outcome: "sending", expiresAt: Infinity};
+  state.pendingGroup = operation;
+  state.lastGroupChange = operation;
   updateGroupOverlay();
+  traceAction("group_start", {requestId: operation.requestId, selected: player.player_id, memberId, action});
   try {
-    const result = await api("/api/group-member", {
+    const result = await within(api("/api/group-member", {
       method: "POST",
-      body: JSON.stringify({player_id: player.player_id, member_id: memberId, action}),
-    });
-    if (result?.selected_player_id) {
-      state.selectedPlayerId = result.selected_player_id;
-      localStorage.setItem("family-music-player-id", result.selected_player_id);
-    }
-    const confirmed = await waitForGroupMembership(memberId, action);
-    if (!confirmed) {
-      state.pendingGroup = null;
-      updateGroupOverlay();
-      showToast("Sonos group change was not confirmed", 3000);
-    }
+      body: JSON.stringify({player_id: player.player_id, member_id: memberId, action,
+        request_id: operation.requestId}),
+    }), 30000);
+    operation.outcome = "accepted";
+    // Start the observation budget after command acceptance, not before it.
+    operation.expiresAt = Date.now() + Math.min(result.confirmation_timeout_ms || GROUP_CONFIRM_MS, GROUP_CONFIRM_MS);
+    traceAction("group_accepted", {requestId: operation.requestId});
   } catch (error) {
-    state.pendingGroup = null;
-    updateGroupOverlay();
-    showToast(error.message, 3500);
+    if (error.outcome === "rejected") {
+      operation.outcome = "rejected";
+      state.pendingGroup = null;
+      showToast(error.message, 5000);
+      traceAction("group_rejected", {requestId: operation.requestId});
+      updateGroupOverlay();
+      return;
+    }
+    // A lost response cannot tell us whether the command executed. Observe;
+    // never issue a second join/leave automatically.
+    operation.outcome = "unknown";
+    operation.expiresAt = Date.now() + GROUP_CONFIRM_MS;
+    traceAction("group_response_unknown", {requestId: operation.requestId});
   }
+  const confirmed = await waitForGroupMembership(memberId, action, operation);
+  state.pendingGroup = null;
+  if (!confirmed) {
+    operation.outcome = "unknown";
+    showToast("Group command outcome unknown; refresh topology before retrying", 6000);
+    traceAction("group_confirmation_unavailable", {requestId: operation.requestId});
+  }
+  updateGroupOverlay();
 }
 
 function renderGroupOverlay() {
@@ -1156,6 +1241,20 @@ function schedulePoll(delay = 1500) {
 
 async function boot() {
   wire();
+  document.documentElement.dataset.familyMusicVersion = APP_VERSION;
+  const info = $("#buildInfo");
+  if (info) info.textContent = `Standalone frontend ${APP_VERSION}; checking backend…`;
+  try {
+    const backend = await api("/api/info");
+    if (backend.frontend !== "standalone" || typeof backend.version !== "string") {
+      throw new Error("Backend version probe returned an unexpected response");
+    }
+    if (info) info.textContent = `Standalone frontend ${APP_VERSION}; backend ${backend.version}`;
+    traceAction("client_loaded", {backendVersion: backend.version});
+  } catch (_) {
+    if (info) info.textContent = `Standalone frontend ${APP_VERSION}; backend version unavailable`;
+    console.warn("Family Music backend version probe failed");
+  }
   await refreshState();
   schedulePoll(1500);
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/service-worker.js");
