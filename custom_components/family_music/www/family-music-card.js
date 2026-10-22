@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.25";
+const CARD_VERSION = "0.3.26";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -1227,28 +1227,30 @@ class FamilyMusicCard extends HTMLElement {
   }
 
   async _resolveTransportTarget(selectedPlayer) {
-    if (!selectedPlayer || !this._hass?.states?.[selectedPlayer]) {
+    const state = this._hass?.states?.[selectedPlayer];
+    if (!state || ["unavailable", "unknown"].includes(state.state)) {
       throw new Error("Selected speaker is unavailable");
     }
-    if (this._hass.states[selectedPlayer].attributes?.mass_player_type === "group") {
-      return selectedPlayer;
+    if (state.attributes?.mass_player_type === "group") return selectedPlayer;
+
+    // HA Music Assistant group_members lists the actual queue coordinator first.
+    // This is the same authoritative entity state that drives the speaker UI;
+    // do not depend on the separate native Sonos topology websocket.
+    const members = state.attributes?.group_members;
+    if (!Array.isArray(members) || members.length <= 1) return selectedPlayer;
+    if (!members.includes(selectedPlayer)) {
+      throw new Error("Selected speaker is absent from its reported group");
     }
-    // Query current Sonos coordinator for EVERY command, not the cached group UI.
-    const topology = await this._ws("family_music/group_topology", {
-      player_entity_id: selectedPlayer,
-    });
-    if (!topology?.available || !Array.isArray(topology.speakers)) {
-      throw new Error("Cannot verify current Sonos group coordinator");
+    const coordinator = members[0];
+    const leader = this._hass.states[coordinator];
+    const queue = state.attributes?.active_queue;
+    if (!leader || ["unavailable", "unknown"].includes(leader.state) ||
+        !queue || leader.attributes?.active_queue !== queue ||
+        !Array.isArray(leader.attributes?.group_members) ||
+        !leader.attributes.group_members.includes(selectedPlayer)) {
+      throw new Error("Cannot verify group queue owner");
     }
-    const selected = topology.speakers.find((p) => p.entity_id === selectedPlayer);
-    const leader = topology.speakers.find(
-      (p) => p.coordinator && p.player_id === topology.leader_id
-    );
-    if (!selected?.member || !leader?.member || !leader.available ||
-        !leader.entity_id || !this._hass.states[leader.entity_id]) {
-      throw new Error("Sonos group coordinator is unavailable or inconsistent");
-    }
-    return leader.entity_id;
+    return coordinator;
   }
 
   async _skipTrack(direction) {
