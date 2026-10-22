@@ -390,19 +390,26 @@ test('favorites profile separates unique Spotify instances and retains shared it
   const {run} = standalone();
   run(`state.favoritesResults = {
     playlists: [
-      {name:'David only',provider_instances:['spotify--Q5Eakxzw']},
-      {name:'Kaelah only',provider_instances:['spotify--ooVGVwHn']},
-      {name:'Shared',provider_instances:['spotify--Q5Eakxzw','spotify--ooVGVwHn']},
+      {name:'David only',uri:'library://playlist/23',provider_instances:['spotify--Q5Eakxzw']},
+      {name:'Kaelah only',uri:'library://playlist/81',provider_instances:['spotify--ooVGVwHn']},
+      {name:'Shared',uri:'library://playlist/116',provider_instances:['spotify--Q5Eakxzw','spotify--ooVGVwHn']},
       {name:'Unknown',provider_instances:[]},
       {name:'Apple',provider_instances:['apple_music--x']}
     ], sonos_favorites:[{name:'Native Sonos'}]
   }`);
   assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david').playlists"), x=>x.name),
-    ['David only','Shared']);
+    ['David only']);
   assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'kaelah').playlists"), x=>x.name),
     ['Kaelah only','Shared']);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'david').sonos_favorites.length"), 0);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').playlists.length"), 5);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').sonos_favorites.length"), 1);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'invalid').playlists.length"), 5);
+});
+
+test('David Spotify screenshot playlist IDs remain the only David playlists', () => {
+  const {run} = standalone();
+  run(`state.favoritesResults = {playlists: Array.from({length:120},(_,i)=>({name:String(i),uri:'library://playlist/'+i,provider_instances:['spotify--Q5Eakxzw','spotify--ooVGVwHn']}))}`);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david').playlists"), x=>x.uri),
+    ['library://playlist/19','library://playlist/21','library://playlist/22','library://playlist/23','library://playlist/25','library://playlist/27']);
 });

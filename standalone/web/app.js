@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.52";
+const APP_VERSION = "0.2.53";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -648,9 +648,22 @@ function filterFavoriteProfile(data, profile) {
   if (profile === "all") return data;
   const instance = SPOTIFY_PROFILES[profile];
   if (!instance) return data;
+  // MA provider mappings identify playable sources, not the Spotify account's
+  // saved-library membership. David's Spotify library was verified against the
+  // owner's Spotify screenshot on 2026-10-22. Prefer exact library item IDs.
+  const davidLibraryPlaylistIds = new Set(["19", "21", "22", "23", "25", "27"]);
   return Object.fromEntries(Object.entries(data || {}).map(([kind, items]) => [kind,
-    (items || []).filter((item) => Array.isArray(item?.provider_instances)
-      && item.provider_instances.includes(instance)),
+    (items || []).filter((item) => {
+      if (profile === "david" && kind === "playlists") {
+        const id = String(item?.uri || "").match(/^library:\/\/playlist\/(\d+)$/)?.[1];
+        return id ? davidLibraryPlaylistIds.has(id) : false;
+      }
+      if (profile === "kaelah" && kind === "playlists") {
+        const id = String(item?.uri || "").match(/^library:\/\/playlist\/(\d+)$/)?.[1];
+        if (id && davidLibraryPlaylistIds.has(id)) return false;
+      }
+      return Array.isArray(item?.provider_instances) && item.provider_instances.includes(instance);
+    }),
   ]));
 }
 
