@@ -413,3 +413,14 @@ test('David Spotify screenshot playlist IDs remain the only David playlists', ()
   assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david').playlists"), x=>x.uri),
     ['library://playlist/19','library://playlist/21','library://playlist/22','library://playlist/23','library://playlist/25','library://playlist/27']);
 });
+
+test('Apple Music favorites belong to David, not Kaelah, even with cross-provider mapping', () => {
+  const {run} = standalone();
+  run(`state.favoritesResults = {albums:[{name:'=',providers:['apple_music','spotify'],provider_instances:['apple_music--qpuX24cG','spotify--ooVGVwHn']}],tracks:[{name:'Hush Little Baby',providers:['apple_music'],provider_instances:['apple_music--qpuX24cG']}],playlists:[{name:'Apple playlist',providers:['apple_music'],provider_instances:['apple_music--qpuX24cG']}]}`);
+  const apple = "filterFavoriteProvider(state.favoritesResults,'apple')";
+  assert.equal(run(`filterFavoriteProfile(${apple},'all','apple').albums.length`), 1);
+  assert.equal(run(`filterFavoriteProfile(${apple},'david','apple').albums.length`), 1);
+  assert.equal(run(`filterFavoriteProfile(${apple},'david','apple').tracks.length`), 1);
+  assert.equal(run(`filterFavoriteProfile(${apple},'kaelah','apple').albums.length`), 0);
+  assert.equal(run(`filterFavoriteProfile(${apple},'kaelah','apple').playlists.length`), 0);
+});
