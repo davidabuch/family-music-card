@@ -1,4 +1,4 @@
-const CARD_VERSION = "0.3.25";
+const CARD_VERSION = "0.3.26";
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -1226,7 +1226,28 @@ class FamilyMusicCard extends HTMLElement {
     return pending.value;
   }
 
+  _traceTransport(phase, detail = {}) {
+    const record = {
+      time: new Date().toISOString(),
+      phase,
+      selected: this._selectedPlayer,
+      ...detail,
+    };
+    this._transportTrace = [...(this._transportTrace || []), record].slice(-30);
+    console.info("[Family Music transport]", record);
+    try {
+      sessionStorage.setItem("family-music-transport-trace", JSON.stringify(this._transportTrace));
+    } catch (_error) {
+      // Diagnostics must never interrupt playback.
+    }
+  }
+
   async _resolveTransportTarget(selectedPlayer) {
+    this._traceTransport("resolve_start", {
+      state: this._hass?.states?.[selectedPlayer]?.state,
+      group_members: this._hass?.states?.[selectedPlayer]?.attributes?.group_members,
+      active_queue: this._hass?.states?.[selectedPlayer]?.attributes?.active_queue,
+    });
     if (!selectedPlayer || !this._hass?.states?.[selectedPlayer]) {
       throw new Error("Selected speaker is unavailable");
     }
@@ -1234,9 +1255,26 @@ class FamilyMusicCard extends HTMLElement {
       return selectedPlayer;
     }
     // Query current Sonos coordinator for EVERY command, not the cached group UI.
-    const topology = await this._ws("family_music/group_topology", {
-      player_entity_id: selectedPlayer,
-    });
+    let topology;
+    try {
+      topology = await this._ws("family_music/group_topology", {
+        player_entity_id: selectedPlayer,
+      });
+      this._traceTransport("topology_result", {
+        available: topology?.available,
+        leader_id: topology?.leader_id,
+        speakers: topology?.speakers?.map((p) => ({
+          entity_id: p.entity_id,
+          player_id: p.player_id,
+          member: p.member,
+          coordinator: p.coordinator,
+          available: p.available,
+        })),
+      });
+    } catch (error) {
+      this._traceTransport("topology_error", { error: String(error) });
+      throw error;
+    }
     if (!topology?.available || !Array.isArray(topology.speakers)) {
       throw new Error("Cannot verify current Sonos group coordinator");
     }
@@ -1248,6 +1286,7 @@ class FamilyMusicCard extends HTMLElement {
         !leader.entity_id || !this._hass.states[leader.entity_id]) {
       throw new Error("Sonos group coordinator is unavailable or inconsistent");
     }
+    this._traceTransport("resolved", { target: leader.entity_id });
     return leader.entity_id;
   }
 
@@ -1261,10 +1300,13 @@ class FamilyMusicCard extends HTMLElement {
     try {
       const target = await this._resolveTransportTarget(selected);
       if (this._selectedPlayer !== selected) return;
+      this._traceTransport("service_start", { service, target });
       await this._hass.callService("media_player", service, { entity_id: target });
+      this._traceTransport("service_accepted", { service, target });
       button?.classList.add("accepted");
       window.setTimeout(() => button?.classList.remove("accepted"), 500);
     } catch (error) {
+      this._traceTransport("track_error", { service, error: String(error) });
       console.error("Family Music group track control failed:", error);
     } finally {
       button?.removeAttribute("aria-busy");
@@ -1407,16 +1449,18 @@ class FamilyMusicCard extends HTMLElement {
         button.innerHTML = `<ha-icon icon="${targetState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
       }
       const selected = this._selectedPlayer;
+      this._traceTransport("button_click", { targetState, actualState });
       this._resolveTransportTarget(selected)
         .then((target) => {
           if (this._selectedPlayer !== selected) return;
-          return this._hass.callService(
-            "media_player",
-            targetState === "playing" ? "media_play" : "media_pause",
-            { entity_id: target }
-          );
+          const service = targetState === "playing" ? "media_play" : "media_pause";
+          this._traceTransport("service_start", { service, target });
+          return this._hass.callService("media_player", service, { entity_id: target })
+            .then(() => this._traceTransport("service_accepted", { service, target }));
+
         })
         .catch((error) => {
+          this._traceTransport("playback_error", { error: String(error) });
           console.error("Family Music group playback control failed:", error);
           this._optimisticPlayback = null;
           this._optimisticPlaybackUntil = 0;
