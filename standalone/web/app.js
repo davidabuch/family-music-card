@@ -260,7 +260,8 @@ function wholeHouseSessions() {
     if (seen.has(id)) continue;
     seen.add(id);
     const members = state.players.filter(p => p.player_id === id ||
-      (p.synced_to === id && isPhysicalSonos(p)));
+      (p.synced_to === id && isPhysicalSonos(p) &&
+        [...(leader.group_members || []), ...(leader.group_childs || [])].includes(p.player_id)));
     const label = members.length > 1 ? members.map(playerName).join(" + ") : playerName(leader);
     const playback = observedPlayback(leader);
     const queue = state.queues.find(q => q.queue_id === id || q.queue_id === leader.active_source);
