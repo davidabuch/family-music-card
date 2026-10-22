@@ -1185,7 +1185,8 @@ def test_personal_favorites_use_only_own_provider_queries(monkeypatch):
     def fake_command(command, **kwargs):
         calls.append((command, kwargs))
         return [{"uri": f"library://{kwargs['provider']}/{command}",
-                 "name": "Account favorite", "favorite": True}]
+                 "name": "Account favorite", "favorite": True,
+                 "provider_mappings": [{"provider_instance": kwargs["provider"]}]}]
 
     monkeypatch.setattr(standalone.client, "command", fake_command)
     monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [])
