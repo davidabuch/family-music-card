@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.58"
+APP_VERSION = "0.2.59"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -972,12 +972,19 @@ def recents(queue_id: str, limit: int = 40) -> list[dict[str, Any]]:
     return [normalize_item(item) for item in raw if isinstance(item, dict)]
 
 
-def search(query: str, provider: str = "all", limit: int = 40) -> dict[str, list[dict[str, Any]]]:
-    providers = {
-        "apple": ["apple_music"],
-        "spotify": ["spotify"],
-        "all": ["apple_music", "spotify"],
-    }.get(provider, ["apple_music", "spotify"])
+def search(query: str, provider: str = "all", limit: int = 40,
+           profile: str = "all") -> dict[str, list[dict[str, Any]]]:
+    if profile not in ("all", *FAVORITE_ACCOUNT_INSTANCES):
+        raise ValueError("Unknown search profile")
+    if provider not in ("all", "apple", "spotify"):
+        raise ValueError("Unknown search provider")
+    domains = {"apple": {"apple_music"}, "spotify": {"spotify"},
+               "all": {"apple_music", "spotify"}}[provider]
+    providers = ([instance for instance in FAVORITE_ACCOUNT_INSTANCES[profile]
+                  if instance.split("--")[0] in domains]
+                 if profile != "all" else sorted(domains))
+    if not providers:
+        return {key: [] for key in ("artists", "albums", "tracks", "playlists", "radio")}
     raw = client.command(
         "music/search",
         search_query=query,
@@ -1300,7 +1307,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not term:
                     self._send_json({"error": "q is required"}, HTTPStatus.BAD_REQUEST)
                     return
-                self._send_json(search(term, provider))
+                profile = query.get("profile", ["all"])[0]
+                self._send_json(search(term, provider, profile=profile))
                 return
             self._serve_static(path)
         except (MAError, ValueError, json.JSONDecodeError) as err:
