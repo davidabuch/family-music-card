@@ -24,3 +24,6 @@ The project is packaged as a HACS custom repository integration. Release install
 See [Issue #98 investigation and commissioning notes](docs/issue-98-investigation.md)
 for the confirmed standalone origin failure, HA-card diagnostics, conservative
 backend ownership policy, restart behavior and physical acceptance checks.
+
+See [Post-PR #99 state synchronization](docs/post-99-state-synchronization.md) for
+player/queue observation fixes, measured Pico propagation, diagnostics and commissioning.

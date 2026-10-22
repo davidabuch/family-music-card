@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.50";
+const APP_VERSION = "0.2.51";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -17,6 +17,10 @@ const state = {
   pollTimer: null,
   pollFailures: 0,
   refreshPromise: null,
+  stateAvailable: true,
+  reconciliations: new Map(),
+  volumeDragging: false,
+  lastObservation: null,
   pendingMute: null,
   pendingVolume: null,
   volumeWrites: new Map(),
@@ -250,14 +254,25 @@ function renderPlayerSelect() {
   }
 }
 
+// Playback observations come from MA's player model, never its retained queue.
+// A synced physical member follows only a reciprocally observed coordinator.
+function playbackPlayer(player = selectedPlayer()) {
+  if (!player || player.available === false) return null;
+  if (isPhysicalSonos(player) && player.synced_to) {
+    const leader = state.players.find(p => p.player_id === player.synced_to);
+    const members = [...(leader?.group_members || []), ...(leader?.group_childs || [])];
+    return leader?.available !== false && members.includes(player.player_id) ? leader : null;
+  }
+  return player;
+}
+
+function observedPlayback(player = selectedPlayer()) {
+  const value = playbackPlayer(player)?.state;
+  return state.stateAvailable && ["playing", "paused", "idle", "off"].includes(value) ? value : null;
+}
+
 function destinationIsPlaying(player) {
-  if (!player) return false;
-  if (player.state === "playing") return true;
-  return state.queues.some(
-    (queue) =>
-      (queue.queue_id === player.player_id || queue.queue_id === player.active_source) &&
-      queue.state === "playing"
-  );
+  return observedPlayback(player) === "playing";
 }
 
 function destinationActivityMarkup(player, selected = false) {
@@ -312,7 +327,7 @@ function renderNow() {
   const queue = selectedQueue();
   // Music Assistant may retain the last queue item after a Sonos-native
   // station/source change. In that case the player media is authoritative.
-  const queueActive = queue?.state === "playing" || queue?.state === "paused";
+  const queueActive = maQueueActive(queue, player) && queue.state === observedPlayback(player);
   const item = queueActive
     ? (queue?.current_item || player?.current_media || null)
     : (player?.current_media || queue?.current_item || null);
@@ -329,7 +344,10 @@ function renderNow() {
     img.onerror = () => { void recoverSonosArtwork(img, item, image); };
   }
 
-  const playing = player?.state === "playing" || (queueActive && queue?.state === "playing");
+  const playback = observedPlayback(player);
+  const playing = playback === "playing";
+  $("#playPause").disabled = playback === null;
+  $("#playPause").title = playback === null ? "Playback state unavailable" : (playing ? "Pause" : "Play");
   $("#playPause").textContent = playing ? "❚❚" : "▶";
 
   const pendingMute = state.pendingMute?.playerId === player?.player_id ? state.pendingMute : null;
@@ -338,7 +356,7 @@ function renderNow() {
   $("#mute").setAttribute("aria-pressed", String(muted));
 
   const volume = effectiveVolume(player);
-  if (!state.seeking && document.activeElement !== $("#volume")) $("#volume").value = volume;
+  if (!state.volumeDragging) $("#volume").value = volume;
   $("#volumeValue").textContent = volume;
 
   const duration = Number(item?.duration || item?.media_item?.duration || 0);
@@ -379,11 +397,28 @@ function renderNow() {
   shuffle.title = shuffle.getAttribute("aria-label");
 }
 
-async function refreshState() {
-  if (state.refreshPromise) return state.refreshPromise;
+async function refreshState({afterCurrent = false} = {}) {
+  if (state.refreshPromise) {
+    if (!afterCurrent) return state.refreshPromise;
+    await state.refreshPromise;
+    // Coalesce callers onto one successor, which starts after command acceptance.
+    return refreshState();
+  }
   state.refreshPromise = (async () => {
     try {
-      const result = await api("/api/state");
+      const started = Date.now();
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 6000);
+      let result;
+      try { result = await api("/api/state", {signal: controller.signal, cache: "no-store"}); }
+      finally { window.clearTimeout(timeout); }
+      if (!Array.isArray(result.players) || !Array.isArray(result.queues)) {
+        throw new Error("State observation unavailable");
+      }
+      state.stateAvailable = true;
+      state.stateTiming = {readStartedAt: started,
+        sincePreviousReadMs: state.stateTiming ? started - state.stateTiming.readStartedAt : null,
+        roundTripMs: Date.now() - started, ...result.timing};
       state.players = Array.isArray(result.players)
         ? result.players.filter((p) => p.available !== false)
         : [];
@@ -408,6 +443,15 @@ async function refreshState() {
         }
       }
       renderNow();
+      const player = selectedPlayer();
+      const observation = {selected: state.selectedPlayerId, playback: observedPlayback(),
+        playerState: player?.state ?? null, queueState: selectedQueue()?.state ?? null,
+        volume: player?.type === "group" ? player?.group_volume : player?.volume_level};
+      const signature = JSON.stringify(observation);
+      if (signature !== state.lastObservation) {
+        traceAction("state_observed", {...observation, ...state.stateTiming});
+        state.lastObservation = signature;
+      }
       updateDestinationActivity();
       if (state.lastGroupChange?.outcome === "unknown") {
         reconcileGroupChange(state.lastGroupChange);
@@ -416,6 +460,8 @@ async function refreshState() {
       void refreshNativeModes();
       return true;
     } catch (error) {
+      state.stateAvailable = false;
+      renderNow();
       state.pollFailures = Math.min(state.pollFailures + 1, 4);
       showToast(error.message, 3000);
       return false;
@@ -424,6 +470,31 @@ async function refreshState() {
     }
   })();
   return state.refreshPromise;
+}
+
+// Only observations confirm a command. Up to seven reads in a six-second window
+// (plus bounded in-flight reads), shared with polling. Never retry commands.
+async function reconcileState(key, playerId, matches, requestId = null) {
+  const token = {};
+  state.reconciliations.set(key, token);
+  const deadline = Date.now() + 6000;
+  try {
+    for (let attempt = 0; attempt < 7; attempt++) {
+      if (state.reconciliations.get(key) !== token || state.selectedPlayerId !== playerId) return;
+      const fresh = await refreshState({afterCurrent: attempt === 0});
+      if (state.reconciliations.get(key) !== token || state.selectedPlayerId !== playerId) return;
+      if (fresh && matches()) {
+        traceAction("command_observed", {key, requestId, selected: playerId});
+        return;
+      }
+      if (!fresh || Date.now() >= deadline || attempt === 6) break;
+      await new Promise(resolve => window.setTimeout(resolve, 1000));
+    }
+    traceAction("confirmation_unavailable", {key, requestId, selected: playerId});
+    showToast("Command accepted; state not yet confirmed", 3000);
+  } finally {
+    if (state.reconciliations.get(key) === token) state.reconciliations.delete(key);
+  }
 }
 
 function escapeHtml(value) {
@@ -697,7 +768,8 @@ function traceAction(phase, detail = {}) {
 
 async function transport(action, button) {
   const qid = queueId();
-  if (!qid || state.transportPending) return;
+  if (!qid || state.transportPending || !state.stateAvailable) return;
+  const playerId = state.selectedPlayerId;
   const requestId = crypto.randomUUID();
   state.transportPending = true;
   button.setAttribute("aria-busy", "true");
@@ -710,7 +782,12 @@ async function transport(action, button) {
     traceAction("transport_accepted", {requestId});
     button.classList.add("accepted");
     window.setTimeout(() => button.classList.remove("accepted"), 450);
-    await refreshState();
+    if (action === "play" || action === "pause") {
+      await reconcileState("transport", playerId,
+        () => action === "play" ? observedPlayback() === "playing" : observedPlayback() === "paused", requestId);
+    } else {
+      await refreshState({afterCurrent: true});
+    }
   } catch (error) {
     traceAction("transport_error", {requestId, status: error.status || "network",
       originReference: error.requestId || "none"});
@@ -722,6 +799,7 @@ async function transport(action, button) {
 }
 
 function queueVolumeWrite(playerId, level, flush = false) {
+  state.reconciliations.delete("volume");
   const bounded = Math.max(0, Math.min(100, Math.round(Number(level))));
   let writer = state.volumeWrites.get(playerId);
   if (!writer) {
@@ -738,11 +816,13 @@ function queueVolumeWrite(playerId, level, flush = false) {
     const nextLevel = writer.pendingLevel;
     writer.pendingLevel = null;
     writer.inFlight = true;
+    let accepted = false;
     try {
       await api("/api/volume", {
         method: "POST",
         body: JSON.stringify({player_id: playerId, level: nextLevel}),
       });
+      accepted = true;
     } catch (error) {
       if (state.pendingVolume?.playerId === playerId) state.pendingVolume = null;
       showToast(error.message, 3000);
@@ -750,6 +830,14 @@ function queueVolumeWrite(playerId, level, flush = false) {
       writer.inFlight = false;
       if (writer.pendingLevel !== null) {
         writer.timer = window.setTimeout(drain, 0);
+      } else {
+        if (state.pendingVolume?.playerId === playerId) state.pendingVolume = null;
+        renderNow();
+        if (accepted) void reconcileState("volume", playerId, () => {
+          const p = state.players.find(item => item.player_id === playerId);
+          const actual = p?.type === "group" ? p?.group_volume : p?.volume_level;
+          return p?.available !== false && actual != null && Number(actual) === nextLevel;
+        });
       }
     }
   };
@@ -1211,14 +1299,20 @@ function wire() {
   $("#more").addEventListener("click",()=>isPhysicalSonos(selectedPlayer())?renderGroupOverlay():renderBalanceOverlay);
   $("#previous").addEventListener("click",(event)=>transport("previous",event.currentTarget));
   $("#next").addEventListener("click",(event)=>transport("next",event.currentTarget));
-  $("#playPause").addEventListener("click",(event)=>transport(selectedPlayer()?.state==="playing"?"pause":"play",event.currentTarget));
+  $("#playPause").addEventListener("click",(event)=>transport(observedPlayback()==="playing"?"pause":"play",event.currentTarget));
   $("#shuffle").addEventListener("click",toggleShuffle);
   $("#repeat").addEventListener("click",toggleRepeat);
   $("#mute").addEventListener("click",toggleMute);
   $("#volumeDown").addEventListener("click",()=>nudgeVolume(-1));
   $("#volumeUp").addEventListener("click",()=>nudgeVolume(1));
+  $("#volume").addEventListener("pointerdown",()=>{state.volumeDragging=true;});
+  for (const event of ["pointerup", "pointercancel", "blur"]) {
+    // Do not rewrite the range value on pointerup: change still needs its final
+    // input value. The next observation will render it, even if focus remains.
+    $("#volume").addEventListener(event,()=>{state.volumeDragging=false;});
+  }
   $("#volume").addEventListener("input",(event)=>setVolume(event.target.value,false));
-  $("#volume").addEventListener("change",(event)=>setVolume(event.target.value,true));
+  $("#volume").addEventListener("change",(event)=>{state.volumeDragging=false;setVolume(event.target.value,true);});
   $("#progress").addEventListener("pointerdown",()=>{state.seeking=true;});
   $("#progress").addEventListener("input",(event)=>{
     state.seeking=true;

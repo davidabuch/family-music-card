@@ -1,3 +1,11 @@
+## 0.2.51
+
+- Use observed player/coordinator state consistently for Play/Pause; retained queue state cannot override it.
+- Reconcile accepted transport/volume commands with bounded fresh reads, preserving single-flight polling and all PR #99 grouping fixes.
+- Keep focused volume sliders synchronized with external changes after dragging ends.
+- Add bounded state timing diagnostics and a read-only native/MA commissioning sampler.
+- See `docs/post-99-state-synchronization.md` for measured evidence, remaining upstream latency, commissioning and rollback.
+
 ## 0.2.50
 
 - Fix grouped native pause/resume by verifying the selected speaker's actual Sonos coordinator.

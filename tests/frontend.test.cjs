@@ -22,7 +22,7 @@ function environment() {
   const element = {textContent: '', classList: {add(){}, remove(){}},
     setAttribute(){}, removeAttribute(){}};
   const context = vm.createContext({
-    Date: DateMock, clock, crypto: {randomUUID}, console: {info(){}, warn(){}, error(){}},
+    Date: DateMock, clock, AbortController, crypto: {randomUUID}, console: {info(){}, warn(){}, error(){}},
     localStorage: {getItem(){return null}, setItem(){}}, sessionStorage: {setItem(){}},
     document: {querySelector(){return element}, querySelectorAll(){return []}, documentElement:{dataset:{}}},
     window: {setTimeout: timer, clearTimeout: id => timers.delete(id), customCards: []},
@@ -30,7 +30,7 @@ function environment() {
     HTMLElement: class {attachShadow(){this.shadowRoot = {getElementById(){return element}}}},
     customElements: {get(){}, define(){}}, navigator: {},
   });
-  return {context, run: code => vm.runInContext(code, context)};
+  return {context, timers, run: code => vm.runInContext(code, context)};
 }
 
 function standalone() {
@@ -206,4 +206,182 @@ test('HA diagnostic command failure is observable and cannot interrupt playback'
   await run('card._togglePlayback()');
   assert.equal(run('card.calls.length'),1);
   assert.match(run('card._diagnosticStatus'),/unavailable; local trace retained/);
+});
+
+function stateUI() {
+  const env = standalone();
+  env.run(`
+    const nodes = new Map();
+    document.querySelector = selector => {
+      if (!nodes.has(selector)) nodes.set(selector, {textContent:'', value:0, dataset:{},
+        listeners:{},addEventListener(type,handler){this.listeners[type]=handler},
+        classList:{add(){},remove(){},toggle(){}},setAttribute(){},removeAttribute(){},
+        getAttribute(){return ''},querySelectorAll(){return []}});
+      return nodes.get(selector);
+    };
+    renderPlayerSelect=()=>{}; updateDestinationActivity=()=>{}; refreshNativeModes=async()=>{};
+    state.players[0].state='paused';state.players[0].volume_level=10;
+    state.queues=[{queue_id:'RINCON_A',state:'playing',current_item:{name:'Old queue'}}];
+  `);
+  return env;
+}
+
+test('stale playing queue cannot override paused player icon or toggle; unavailable disables control', () => {
+  const {run} = stateUI();
+  run('renderNow()');
+  assert.equal(run('$("#playPause").textContent'), '▶');
+  assert.equal(run('destinationIsPlaying(selectedPlayer())'), false);
+  run(`state.players[0].state='playing';state.queues[0].state='paused';renderNow()`);
+  assert.equal(run('$("#playPause").textContent'), '❚❚');
+  run(`state.players[0].state='unavailable';renderNow()`);
+  assert.equal(run('$("#playPause").disabled'), true);
+});
+
+test('group member follows only reciprocal coordinator observation; permanent MA group keeps own state', () => {
+  const {run} = stateUI();
+  run(`state.players[0].synced_to='RINCON_B';state.players[1].state='playing'`);
+  assert.equal(run('observedPlayback()'), null);
+  run(`state.players[1].group_members=['RINCON_A','RINCON_B']`);
+  assert.equal(run('observedPlayback()'), 'playing');
+  run(`state.players[0].type='group';state.players[0].state='paused'`);
+  assert.equal(run('observedPlayback()'), 'paused');
+});
+
+test('overlapping polls share one read; post-command wait gets a fresh coalesced successor', async () => {
+  const {run} = stateUI();
+  run(`let reads=0;let release;
+    api=()=>{reads++;return new Promise(resolve=>{release=()=>resolve({players:state.players,queues:[]})})};
+    const first=refreshState();const poll=refreshState();
+    const after=refreshState({afterCurrent:true});const after2=refreshState({afterCurrent:true});`);
+  assert.equal(run('reads'), 1);
+  run('release()');
+  await run('first');
+  assert.equal(run('reads'), 2);
+  run('release()');
+  await run('Promise.all([poll,after,after2])');
+  assert.equal(run('reads'), 2);
+});
+
+test('delayed pause propagates without optimistic icon, duplicate commands or stale queue override', async () => {
+  const {run} = stateUI();
+  run(`state.players[0].state='playing';wire();renderNow();let reads=0;let mutations=0;
+    api=async path=>{
+      if(path==='/api/transport'){mutations++;return {accepted:true}}
+      reads++;return {players:[{...state.players[0],state:reads>=3?'paused':'playing'}],queues:state.queues};
+    };
+    const pause=$('#playPause').listeners.click({currentTarget:$('#playPause')});
+    const duplicate=$('#playPause').listeners.click({currentTarget:$('#playPause')});`);
+  assert.equal(run('$("#playPause").textContent'), '❚❚'); // still the observed state
+  await run('Promise.all([pause,duplicate])');
+  assert.equal(run('mutations'), 1);
+  assert.equal(run('reads'), 3);
+  assert.equal(run('$("#playPause").textContent'), '▶');
+  run(`api=async path=>path==='/api/transport'?(mutations++,{}):({players:[{...state.players[0],state:'playing'}],queues:[]})`);
+  await run(`transport('play',$('#playPause'))`);
+  assert.equal(run('mutations'), 2);
+  assert.equal(run('$("#playPause").textContent'), '❚❚');
+});
+
+test('unconfirmed accepted transport is bounded, remains observed, and is visibly unknown', async () => {
+  const {run} = stateUI();
+  run(`let reads=0;api=async path=>path==='/api/transport'?{}:(reads++,{players:state.players,queues:state.queues})`);
+  await run(`transport('play',$('#playPause'))`);
+  assert.ok(run('reads') <= 7);
+  assert.equal(run('observedPlayback()'), 'paused');
+  assert.match(run('state.lastToast'), /not yet confirmed/);
+  assert.equal(run('state.transportPending'), false);
+});
+
+test('failed or malformed observations cannot confirm commands or leave transport enabled', async () => {
+  for (const expression of [`throw new Error('offline')`, 'return {}']) {
+    const {run} = stateUI();
+    run(`api=async()=>{${expression}}`);
+    assert.equal(await run('refreshState()'), false);
+    assert.equal(run('observedPlayback()'), null);
+    assert.equal(run('$("#playPause").disabled'), true);
+  }
+});
+
+test('external volume refresh updates focused slider and label; dragging alone protects input', async () => {
+  const {run} = stateUI();
+  run(`document.activeElement=$('#volume');
+    api=async()=>({players:[{...state.players[0],volume_level:27}],queues:[]})`);
+  await run('refreshState()');
+  assert.equal(run('$("#volume").value'), 27);
+  assert.equal(run('$("#volumeValue").textContent'), 27);
+  run(`state.volumeDragging=true;state.players[0].volume_level=30;renderNow()`);
+  assert.equal(run('$("#volume").value'), 27);
+  run('state.volumeDragging=false;renderNow()');
+  assert.equal(run('$("#volume").value'), 30);
+});
+
+test('local volume acceptance is not observation; bounded reads display eventual actual value', async () => {
+  const {run} = stateUI();
+  run(`let reads=0;let writes=0;
+    api=async path=>path==='/api/volume'?(writes++,{}):
+      (reads++,{players:[{...state.players[0],volume_level:reads>=3?25:10}],queues:[]});
+    setVolume(25,true);`);
+  // Drain the asynchronous writer and its finite reconciliation, without real clocks.
+  for(let i=0;i<30;i++) await Promise.resolve();
+  assert.equal(run('writes'), 1);
+  assert.equal(run('state.pendingVolume'), null);
+  assert.equal(run('$("#volume").value'), 25);
+  assert.equal(run('reads'), 3);
+});
+
+test('transport rejection stays visible, releases the gate and never infers new playback', async () => {
+  const {run} = stateUI();
+  run(`api=async()=>{throw new Error('service failed')};renderNow()`);
+  await run(`transport('play',$('#playPause'))`);
+  assert.match(run('state.lastToast'), /service failed/);
+  assert.equal(run('state.transportPending'), false);
+  assert.equal(run('observedPlayback()'), 'paused');
+});
+
+test('selection change during reconciliation cannot confirm another destination', async () => {
+  const {run} = stateUI();
+  run(`api=async()=>{state.selectedPlayerId='RINCON_B';return {players:state.players,queues:[]}}`);
+  await run(`reconcileState('transport','RINCON_A',()=>true)`);
+  assert.equal(run(`state.actionTrace.some(e=>e.phase==='command_observed')`), false);
+  assert.equal(run('state.reconciliations.size'), 0);
+});
+
+test('a hung state request is aborted, releases single-flight, and can recover', async () => {
+  const {run, timers} = stateUI();
+  run(`api=async(path,{signal})=>new Promise((resolve,reject)=>{
+    signal.addEventListener('abort',()=>reject(new Error('read aborted')));
+  });const hung=refreshState();`);
+  assert.equal(timers.size, 1);
+  for(const callback of timers.values()) callback();
+  assert.equal(await run('hung'), false);
+  assert.equal(run('state.refreshPromise'), null);
+  assert.equal(run('state.stateAvailable'), false);
+  run('api=async()=>({players:state.players,queues:[]})');
+  assert.equal(await run('refreshState()'), true);
+  assert.equal(run('observedPlayback()'), 'paused');
+});
+
+test('failed volume write clears intent without starting accepted-command reconciliation', async () => {
+  const {run} = stateUI();
+  run(`let reads=0;api=async path=>{
+    if(path==='/api/volume') throw new Error('volume rejected');
+    reads++;return {players:state.players,queues:[]};
+  };setVolume(50,true);`);
+  for(let i=0;i<20;i++) await Promise.resolve();
+  assert.equal(run('reads'), 0);
+  assert.equal(run('state.pendingVolume'), null);
+  assert.equal(run('$("#volume").value'), 10);
+  assert.match(run('state.lastToast'), /volume rejected/);
+});
+
+test('pointer release preserves final slider intent until change commits it', () => {
+  const {run} = stateUI();
+  run(`wire();renderNow();api=(path,options)=>{state.writtenVolume=JSON.parse(options.body).level;return new Promise(()=>{})};
+    const slider=$('#volume');slider.listeners.pointerdown();slider.value=25;
+    slider.listeners.input({target:slider});
+    state.pendingVolume=null;renderNow(); // write has settled but observation is still 10
+    slider.listeners.pointerup();
+    slider.listeners.change({target:slider});`);
+  assert.equal(run('$("#volume").value'), 25);
+  assert.equal(run("state.writtenVolume"), 25);
 });

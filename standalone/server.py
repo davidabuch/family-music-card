@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.50"
+APP_VERSION = "0.2.51"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -1161,8 +1161,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state":
                 # Keep the hot state path provider-free. Artwork recovery is
                 # handled separately by the browser and cached there.
+                started = time.monotonic()
                 players = get_players()
-                self._send_json({"players": players, "queues": get_queues(players)})
+                players_done = time.monotonic()
+                queues = get_queues(players)
+                self._send_json({"players": players, "queues": queues, "timing": {
+                    "playersReadMs": round((players_done - started) * 1000),
+                    "queuesReadMs": round((time.monotonic() - players_done) * 1000),
+                }})
                 return
             if path == "/api/native-modes":
                 queue_id = self._query().get("queue_id", [""])[0]
