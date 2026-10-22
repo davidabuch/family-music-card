@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.57"' in app_config
+    assert 'version: "0.2.58"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1177,3 +1177,35 @@ def test_favorite_ownership_diagnostic_is_read_only_and_account_scoped(monkeypat
         "apple_music--qpuX24cG", "apple_music--ydAVUe7w",
     }
     assert result["accounts"]["alexis"]["playlists"]["items"][0]["name"] == "Example"
+
+
+def test_personal_favorites_use_only_own_provider_queries(monkeypatch):
+    calls = []
+
+    def fake_command(command, **kwargs):
+        calls.append((command, kwargs))
+        return [{"uri": f"library://{kwargs['provider']}/{command}",
+                 "name": "Account favorite", "favorite": True}]
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    monkeypatch.setattr(standalone, "native_sonos_favorites", lambda: [])
+    for profile, expected in {
+        "david": {"spotify--Q5Eakxzw", "apple_music--qpuX24cG"},
+        "kaelah": {"spotify--ooVGVwHn"},
+        "alexis": {"apple_music--ydAVUe7w"},
+    }.items():
+        calls.clear()
+        result = standalone.account_favorites(profile)
+        assert {kwargs["provider"] for _, kwargs in calls} == expected
+        assert len(calls) == 6 * len(expected)
+        assert result["tracks"]
+        assert all(kwargs.get("favorite") is True
+                   for command, kwargs in calls if not
+                   (command == "music/playlists/library_items" and
+                    "favorite" not in kwargs))
+
+
+def test_unknown_favorites_profile_is_rejected():
+    import pytest
+    with pytest.raises(ValueError):
+        standalone.account_favorites("unknown")
