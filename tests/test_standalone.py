@@ -1150,3 +1150,30 @@ def test_commissioning_sampler_only_reads_and_omits_sensitive_metadata(monkeypat
         "avTransport.GetTransportInfo", "renderingControl.GetVolume"
     ]
     assert all(call.kwargs == {"timeout": 2} for call in speaker.mock_calls)
+
+
+def test_favorite_ownership_diagnostic_is_read_only_and_account_scoped(monkeypatch):
+    calls = []
+
+    def fake_command(command, **kwargs):
+        calls.append((command, kwargs))
+        return [{
+            "uri": "library://playlist/1",
+            "name": "Example",
+            "favorite": True,
+            "provider_mappings": [{
+                "provider_instance": kwargs["provider"],
+                "provider_domain": "apple_music",
+            }],
+        }]
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    result = standalone.favorite_ownership_diagnostic()
+    assert set(result["accounts"]) == {"david", "alexis"}
+    assert len(calls) == 6
+    assert all(command.endswith("/library_items") for command, _ in calls)
+    assert all(args["favorite"] is True for _, args in calls)
+    assert {args["provider"] for _, args in calls} == {
+        "apple_music--qpuX24cG", "apple_music--ydAVUe7w",
+    }
+    assert result["accounts"]["alexis"]["playlists"]["items"][0]["name"] == "Example"
