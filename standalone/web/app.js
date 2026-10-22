@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.61";
+const APP_VERSION = "0.2.62";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -939,7 +939,10 @@ function queueVolumeWrite(playerId, level, flush = false) {
       if (writer.pendingLevel !== null) {
         writer.timer = window.setTimeout(drain, 0);
       } else {
-        if (state.pendingVolume?.playerId === playerId) state.pendingVolume = null;
+        // Keep the optimistic value until observed or the bounded timeout.
+        if (!accepted && state.pendingVolume?.playerId === playerId) {
+          state.pendingVolume = null;
+        }
         renderNow();
         if (accepted) void reconcileState("volume", playerId, () => {
           const p = state.players.find(item => item.player_id === playerId);
