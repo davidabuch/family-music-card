@@ -1216,6 +1216,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(modes)
                 return
             if path == "/api/diagnostics/favorite-ownership":
+                if os.environ.get("FAMILY_MUSIC_ENABLE_OWNERSHIP_DIAGNOSTIC") != "1":
+                    self._send_json({"error": "Diagnostic disabled"}, HTTPStatus.NOT_FOUND)
+                    return
                 self._send_json(favorite_ownership_diagnostic())
                 return
             if path == "/api/favorites":
