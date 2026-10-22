@@ -18,6 +18,20 @@ from homeassistant.helpers import entity_registry as er
 from .const import CARD_PATH, CARD_URL, DOMAIN, VERSION
 
 
+def _music_assistant_client(hass: HomeAssistant):
+    """Get MA client from the Music Assistant entry, not our Family Music entry."""
+    entries = [
+        entry
+        for entry in hass.config_entries.async_entries("music_assistant")
+        if entry.state.value == "loaded"
+    ]
+    if len(entries) != 1:
+        raise ValueError(
+            f"Expected exactly one loaded Music Assistant entry; found {len(entries)}"
+        )
+    return get_music_assistant_client(hass, entries[0].entry_id)
+
+
 def _provider_list(provider: str) -> list[str]:
     """Map the card provider choice to Music Assistant provider domains."""
     if provider == "apple":
@@ -311,7 +325,7 @@ def _ma_entity_for_player(registry, player_id: str) -> str | None:
 @websocket_api.async_response
 async def ws_search(hass: HomeAssistant, connection, msg: dict) -> None:
     """Search selected Music Assistant providers without exposing an MA token."""
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     result = await mass.send_command(
         "music/search",
         search_query=msg["query"],
@@ -338,7 +352,7 @@ async def ws_group_members(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return Home Assistant media_player entities for one Music Assistant group."""
     if not _require_entity_permission(connection, msg, msg["player_entity_id"], control=False):
         return
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     registry = er.async_get(hass)
     group_entry = registry.async_get(msg["player_entity_id"])
     group_player_id = (
@@ -526,7 +540,7 @@ async def ws_group_topology(hass: HomeAssistant, connection, msg: dict) -> None:
     if not player_id:
         connection.send_result(msg["id"], {"available": False, "speakers": []})
         return
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     raw = await mass.send_command("players/all")
     players = (
         [player for player in raw if isinstance(player, dict)]
@@ -617,7 +631,7 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
         connection, msg, member_entity, control=True
     ):
         return
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     raw = await mass.send_command("players/all")
     players = (
         [player for player in raw if isinstance(player, dict)]
@@ -710,7 +724,7 @@ async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
     Merge the playlog with the already-played portion of the live queue so
     zone-specific Recents remains useful regardless of playback origin.
     """
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     result = await mass.send_command(
         "music/recently_played_items",
         limit=msg["limit"],
@@ -762,7 +776,7 @@ async def ws_recents(hass: HomeAssistant, connection, msg: dict) -> None:
 @websocket_api.async_response
 async def ws_favorites(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return the union of Music Assistant favorites and household Sonos Favorites."""
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     commands = {
         "artists": "music/artists/library_items",
         "albums": "music/albums/library_items",
@@ -809,7 +823,7 @@ async def ws_favorites(hass: HomeAssistant, connection, msg: dict) -> None:
 @websocket_api.async_response
 async def ws_artist_albums(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return the provider-native album listing for an artist."""
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     result = await mass.send_command(
         "music/artists/artist_albums",
         item_id=msg["item_id"],
@@ -831,7 +845,7 @@ async def ws_artist_albums(hass: HomeAssistant, connection, msg: dict) -> None:
 @websocket_api.async_response
 async def ws_album_tracks(hass: HomeAssistant, connection, msg: dict) -> None:
     """Return all tracks for a provider-native album."""
-    mass = get_music_assistant_client(hass, msg["config_entry_id"])
+    mass = _music_assistant_client(hass)
     result = await mass.send_command(
         "music/albums/album_tracks",
         item_id=msg["item_id"],
