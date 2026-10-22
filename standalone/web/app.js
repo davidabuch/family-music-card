@@ -648,7 +648,11 @@ function filterFavoriteProfile(data, profile, provider = "all") {
   if (profile === "all") return data;
   const instance = SPOTIFY_PROFILES[profile];
   if (!instance) return data;
-  // Only David\'s Apple Music account is configured in Music Assistant.\n  // Filter by selected service first, so cross-service provider mappings on\n  // merged MA library items cannot misattribute Apple Music to Kaelah.\n  if (provider === "apple") return profile === "david" ? data : Object.fromEntries(\n    Object.entries(data || {}).map(([kind]) => [kind, []]));
+  // Only David's Apple Music account is configured in Music Assistant.
+  // Filter by selected service first, so cross-service provider mappings on
+  // merged MA library items cannot misattribute Apple Music to Kaelah.
+  if (provider === "apple") return profile === "david" ? data : Object.fromEntries(
+    Object.entries(data || {}).map(([kind]) => [kind, []]));
   // MA provider mappings identify playable sources, not the Spotify account's
   // saved-library membership. David's Spotify library was verified against the
   // owner's Spotify screenshot on 2026-10-22. Prefer exact library item IDs.
