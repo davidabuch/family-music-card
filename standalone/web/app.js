@@ -251,9 +251,15 @@ function setView(view) {
 // Read-only household overview: group members never become duplicate sessions.
 function wholeHouseSessions() {
   const active = [], idle = [], seen = new Set();
-  for (const player of state.players) {
+  // Prefer an actively playing Music Assistant group over duplicate physical members.
+  const activeGroups = state.players.filter(p => p.type === "group" &&
+    p.available !== false && observedPlayback(p) === "playing");
+  const groupedIds = new Set(activeGroups.flatMap(p =>
+    [...(p.group_members || []), ...(p.group_childs || [])]));
+  for (const player of [...activeGroups, ...state.players.filter(p => p.type !== "group")]) {
     if (!isPhysicalSonos(player) && player.type !== "group") continue;
     if (player.available === false) continue;
+    if (isPhysicalSonos(player) && groupedIds.has(player.player_id)) continue;
     const leader = playbackPlayer(player);
     if (!leader) continue;
     const id = leader.player_id;
