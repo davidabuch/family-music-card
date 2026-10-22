@@ -10,6 +10,7 @@ const state = {
   searchResults: null,
   artistFilter: null,
   favoritesProvider: "all",
+  favoritesProfile: localStorage.getItem("family-music-favorites-profile") || "all",
   favoritesResults: null,
   favoritesLoadedAt: 0,
   favoritesLoading: false,
@@ -636,6 +637,23 @@ function providerOf(item) {
   return "library";
 }
 
+// Provider-instance mapping is a playback/library route, not proof of who favorited
+// a shared item. Preserve items mapped to both profiles in both views.
+const SPOTIFY_PROFILES = Object.freeze({
+  david: "spotify--Q5Eakxzw",
+  kaelah: "spotify--ooVGVwHn",
+});
+
+function filterFavoriteProfile(data, profile) {
+  if (profile === "all") return data;
+  const instance = SPOTIFY_PROFILES[profile];
+  if (!instance) return data;
+  return Object.fromEntries(Object.entries(data || {}).map(([kind, items]) => [kind,
+    (items || []).filter((item) => Array.isArray(item?.provider_instances)
+      && item.provider_instances.includes(instance)),
+  ]));
+}
+
 function filterFavoriteProvider(data, provider) {
   if (provider === "all") return data;
   const filtered = {};
@@ -650,7 +668,7 @@ function showFavorites(force = true) {
   if (!state.favoritesResults) return;
   // Keep existing image nodes intact when merely returning to this tab.
   if (!force && body.querySelector(".media-item, .recent-item")) return;
-  renderSections(body, filterFavoriteProvider(state.favoritesResults, state.favoritesProvider));
+  renderSections(body, filterFavoriteProvider(filterFavoriteProfile(state.favoritesResults, state.favoritesProfile), state.favoritesProvider));
 }
 
 async function loadFavorites() {
@@ -1290,6 +1308,21 @@ function wire() {
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
   document.querySelectorAll(".provider").forEach((button)=>button.addEventListener("click",()=>{state.provider=button.dataset.provider;document.querySelectorAll(".provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});if(state.searchResults)runSearch();}));
   document.querySelectorAll(".search-type").forEach((button)=>button.addEventListener("click",()=>{state.searchType=button.dataset.type;if(state.searchType!=="albums")state.artistFilter=null;syncSearchType();if(state.searchResults)showSearchResults();}));
+  document.querySelectorAll(".favorite-profile").forEach((button)=>{
+    const active = button.dataset.favoriteProfile === state.favoritesProfile;
+    button.classList.toggle("active",active);
+    button.setAttribute("aria-pressed",String(active));
+    button.addEventListener("click",()=>{
+      state.favoritesProfile = button.dataset.favoriteProfile;
+      localStorage.setItem("family-music-favorites-profile",state.favoritesProfile);
+      document.querySelectorAll(".favorite-profile").forEach((n)=>{
+        const selected = n === button;
+        n.classList.toggle("active",selected);
+        n.setAttribute("aria-pressed",String(selected));
+      });
+      showFavorites();
+    });
+  });
   document.querySelectorAll(".favorite-provider").forEach((button)=>button.addEventListener("click",()=>{state.favoritesProvider=button.dataset.favoriteProvider;document.querySelectorAll(".favorite-provider").forEach((n)=>{n.classList.toggle("active",n===button);n.setAttribute("aria-pressed",String(n===button));});showFavorites();}));
   $("#searchButton").addEventListener("click", runSearch);
   $("#voiceSearch").addEventListener("click", startVoiceSearch);
