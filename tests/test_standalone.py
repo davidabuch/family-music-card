@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.50"' in app_config
+    assert 'version: "0.2.51"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -354,7 +354,7 @@ def test_transport_uses_physical_player_and_native_progress():
     root = Path(__file__).resolve().parents[1]
     js = (root / "standalone/web/app.js").read_text()
     server = (root / "standalone/server.py").read_text()
-    assert 'transport(selectedPlayer()?.state==="playing"?"pause":"play"' in js
+    assert 'transport(observedPlayback()==="playing"?"pause":"play"' in js
     assert 'currentMediaPosition(item, player)' in js
     assert 'item?.elapsed_time_last_updated' in js
     assert 'action == "play" and player and player.get("state") == "idle"' in server
@@ -818,7 +818,7 @@ def test_state_path_is_provider_free_and_request_bodies_are_bounded():
 
 def test_polling_is_single_flight_with_backoff_and_no_silent_room_fallback():
     app_js = (ROOT / "standalone" / "web" / "app.js").read_text()
-    assert "if (state.refreshPromise) return state.refreshPromise" in app_js
+    assert "if (!afterCurrent) return state.refreshPromise" in app_js
     assert "state.refreshPromise = null" in app_js
     assert "setInterval(refreshState" not in app_js
     assert "schedulePoll(nextDelay)" in app_js
@@ -1098,3 +1098,55 @@ def test_addon_startup_script_shell_syntax():
     result = subprocess.run(["sh", "-n", str(ROOT / "standalone" / "run.sh")],
                             capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_state_endpoint_times_only_the_two_cached_ma_reads(monkeypatch):
+    players = [{"player_id": "kitchen", "state": "paused", "volume_level": 25}]
+    queues = [{"queue_id": "kitchen", "state": "playing"}]
+    clock = iter([10, 10.025, 10.040])
+    monkeypatch.setattr(standalone.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(standalone, "get_players", lambda: players)
+    monkeypatch.setattr(standalone, "get_queues",
+                        lambda scoped: queues if scoped is players else [])
+    handler = object.__new__(standalone.Handler)
+    handler.path = "/api/state"
+    responses = []
+    handler._send_json = responses.append
+    handler._do_GET()
+    assert responses == [{"players": players, "queues": queues,
+                          "timing": {"playersReadMs": 25, "queuesReadMs": 15}}]
+
+
+def test_commissioning_sampler_only_reads_and_omits_sensitive_metadata(monkeypatch):
+    import io
+    import json
+    import sys
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    module_spec = importlib.util.spec_from_file_location(
+        "state_sampler", ROOT / "standalone/scripts/observe_state.py"
+    )
+    sampler = importlib.util.module_from_spec(module_spec)
+    module_spec.loader.exec_module(sampler)
+    data = {"players": [{"player_id": "room", "state": "paused", "volume_level": 12,
+                         "device_info": {"ip_address": "192.168.1.20"},
+                         "current_media": {"uri": "secret-media-uri"}}],
+            "queues": [{"queue_id": "room", "state": "playing"}]}
+    monkeypatch.setattr(sampler.urllib.request, "urlopen", lambda *a, **k:
+                        io.BytesIO(json.dumps(data).encode()))
+    speaker = Mock()
+    speaker.avTransport.GetTransportInfo.return_value = {"CurrentTransportState": "PAUSED_PLAYBACK"}
+    speaker.renderingControl.GetVolume.return_value = {"CurrentVolume": "12"}
+    factory = Mock(return_value=speaker)
+    monkeypatch.setitem(sys.modules, "soco", SimpleNamespace(SoCo=factory))
+    observation = sampler.observe("http://origin", "room")
+    assert observation["native_volume"] == "12"
+    assert observation["ma_volume"] == 12
+    assert observation["ma_queue_state"] == "playing"
+    assert "secret-media-uri" not in json.dumps(observation)
+    assert "192.168.1.20" not in json.dumps(observation)
+    assert [call[0] for call in speaker.mock_calls] == [
+        "avTransport.GetTransportInfo", "renderingControl.GetVolume"
+    ]
+    assert all(call.kwargs == {"timeout": 2} for call in speaker.mock_calls)
