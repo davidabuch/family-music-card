@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.58"' in app_config
+    assert 'version: "0.2.59"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1209,3 +1209,34 @@ def test_unknown_favorites_profile_is_rejected():
     import pytest
     with pytest.raises(ValueError):
         standalone.account_favorites("unknown")
+
+
+def test_search_scopes_provider_instances_to_family_member(monkeypatch):
+    calls = []
+
+    def fake_command(command, **kwargs):
+        calls.append((command, kwargs))
+        return {"artists": [], "albums": [], "tracks": [], "playlists": [], "radio": []}
+
+    monkeypatch.setattr(standalone.client, "command", fake_command)
+    for profile, provider, expected in (
+        ("david", "all", ["spotify--Q5Eakxzw", "apple_music--qpuX24cG"]),
+        ("david", "apple", ["apple_music--qpuX24cG"]),
+        ("kaelah", "all", ["spotify--ooVGVwHn"]),
+        ("alexis", "all", ["apple_music--ydAVUe7w"]),
+        ("alexis", "spotify", []),
+        ("all", "all", ["apple_music", "spotify"]),
+    ):
+        calls.clear()
+        standalone.search("test", provider=provider, profile=profile)
+        assert len(calls) == (1 if expected else 0)
+        if expected:
+            assert set(calls[0][1]["providers"]) == set(expected)
+
+
+def test_search_rejects_unknown_profiles_and_providers():
+    import pytest
+    with pytest.raises(ValueError):
+        standalone.search("test", profile="unknown")
+    with pytest.raises(ValueError):
+        standalone.search("test", provider="unknown")
