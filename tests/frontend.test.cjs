@@ -401,7 +401,7 @@ test('favorites profile separates unique Spotify instances and retains shared it
     ['David only']);
   assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'kaelah').playlists"), x=>x.name),
     ['Kaelah only','Shared']);
-  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'david').sonos_favorites.length"), 0);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'david').sonos_favorites.length"), 1);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').playlists.length"), 5);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'all').sonos_favorites.length"), 1);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'invalid').playlists.length"), 5);
@@ -423,4 +423,19 @@ test('Apple Music favorites belong to David, not Kaelah, even with cross-provide
   assert.equal(run(`filterFavoriteProfile(${apple},'david','apple').tracks.length`), 1);
   assert.equal(run(`filterFavoriteProfile(${apple},'kaelah','apple').albums.length`), 0);
   assert.equal(run(`filterFavoriteProfile(${apple},'kaelah','apple').playlists.length`), 0);
+});
+
+test('David All combines Apple Music albums, Spotify playlists and native Sonos favorites', () => {
+  const {run} = standalone();
+  run(`state.favoritesResults = {
+    albums:[{name:'Lullabies',providers:['apple_music'],provider_instances:['apple_music--x']}],
+    playlists:[{name:'Beast Mode',uri:'library://playlist/23',providers:['spotify'],provider_instances:['spotify--Q5Eakxzw']},
+      {name:'Kaelah',uri:'library://playlist/81',providers:['spotify'],provider_instances:['spotify--ooVGVwHn']}],
+    sonos_favorites:[{name:'Sleeping Baby',sonos_favorite:true}]
+  }`);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david','all').albums"), x=>x.name), ['Lullabies']);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david','all').playlists"), x=>x.name), ['Beast Mode']);
+  assert.deepEqual(Array.from(run("filterFavoriteProfile(state.favoritesResults,'david','all').sonos_favorites"), x=>x.name), ['Sleeping Baby']);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'kaelah','all').albums.length"), 0);
+  assert.equal(run("filterFavoriteProfile(state.favoritesResults,'kaelah','all').sonos_favorites.length"), 0);
 });
