@@ -439,3 +439,31 @@ test('David All combines Apple Music albums, Spotify playlists and native Sonos 
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'kaelah','all').albums.length"), 0);
   assert.equal(run("filterFavoriteProfile(state.favoritesResults,'kaelah','all').sonos_favorites.length"), 0);
 });
+
+test('Whole House deduplicates synchronized Sonos members and collapses idle rooms', () => {
+  const {run} = standalone();
+  run(`state.players = [
+    {player_id:'RINCON_A',name:'Kitchen',provider:'sonos',type:'player',available:true,state:'playing',
+      group_members:['RINCON_A','RINCON_B'],current_media:{name:'Song A'}},
+    {player_id:'RINCON_B',name:'Living Room',provider:'sonos',type:'player',available:true,
+      state:'playing',synced_to:'RINCON_A'},
+    {player_id:'RINCON_C',name:'Bedroom',provider:'sonos',type:'player',available:true,state:'idle'},
+  ];state.stateAvailable=true`);
+  assert.equal(run('wholeHouseSessions().active.length'), 1);
+  assert.equal(run('wholeHouseSessions().idle.length'), 1);
+  assert.equal(run('wholeHouseSessions().active[0].id'), 'RINCON_A');
+  assert.equal(run('wholeHouseSessions().active[0].label'), 'Kitchen + Living Room');
+  assert.equal(run('state.commandCount'), 0);
+});
+
+test('Whole House excludes unconfirmed synced members rather than claiming group ownership', () => {
+  const {run} = standalone();
+  run(`state.players = [
+    {player_id:'RINCON_A',name:'Kitchen',provider:'sonos',type:'player',available:true,state:'playing',
+      group_members:['RINCON_A']},
+    {player_id:'RINCON_B',name:'Living',provider:'sonos',type:'player',available:true,state:'playing',synced_to:'RINCON_A'}
+  ];state.stateAvailable=true`);
+  assert.equal(run('wholeHouseSessions().active.length'), 1);
+  assert.equal(run('wholeHouseSessions().active[0].label'), 'Kitchen');
+  assert.equal(run('state.commandCount'), 0);
+});
