@@ -7,6 +7,7 @@ It does not require Home Assistant credentials or a Home Assistant session.
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 import os
 import secrets
@@ -20,6 +21,12 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
+
+try:
+    from standalone.temporary_groups import Observation, TemporaryGroups
+except ModuleNotFoundError:  # Direct execution inside the standalone App image.
+    from temporary_groups import Observation, TemporaryGroups
 
 ROOT = Path(__file__).resolve().parent
 WEB_ROOT = ROOT / "web"
@@ -46,6 +53,23 @@ PLAYER_ALLOWLIST = {
 
 
 NATIVE_SONOS_SESSIONS: set[str] = set()
+GROUP_LOCK = threading.RLock()
+TEMPORARY_GROUPS = TemporaryGroups()
+APP_VERSION = "0.2.50"
+REQUEST_CONTEXT = threading.local()
+_LOGGER = logging.getLogger("family_music.standalone")
+
+
+def diagnostic(phase: str, **detail: Any) -> None:
+    """Bounded structured origin evidence; never include URLs, tokens or media."""
+    detail.setdefault("request_id", getattr(REQUEST_CONTEXT, "request_id", ""))
+    allowed = {key: str(value).replace("\n", " ")[:180] for key, value in detail.items()
+               if key in {"request_id", "selected", "target", "action", "error_type", "members"}}
+    try:
+        _LOGGER.warning("Family Music %s %s", phase, json.dumps(allowed, separators=(",", ":")))
+    except Exception:
+        # Response correlation headers and the bounded browser trace remain available.
+        pass
 
 
 class MAError(RuntimeError):
@@ -264,6 +288,11 @@ def _sonos_group_context(
 
 
 def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str, Any]:
+    with GROUP_LOCK:
+        return _change_sonos_group(player_id, member_id, action)
+
+
+def _change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str, Any]:
     """Join/leave a physical Sonos member using Music Assistant native grouping."""
     context = _sonos_group_context(player_id)
     leader_id = context["leader_id"]
@@ -284,12 +313,18 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
         child_members = member.get("group_members") or member.get("group_childs") or []
         if child_members:
             raise ValueError("Speaker is already coordinating another Sonos group")
+        before = _ownership_observation(member_ids | {member_id})
+        diagnostic("group_service_start", selected=player_id, target=member_id, action=action)
         result = client.command(
             "players/cmd/group_many",
             target_player=leader_id,
             child_player_ids=[member_id],
         )
-        return {"accepted": True, "leader_id": leader_id, "result": result}
+        diagnostic("group_service_accepted", selected=player_id, target=member_id, action=action)
+        if before is not None:
+            TEMPORARY_GROUPS.changed(before, player_id, member_id, "join")
+        return {"accepted": True, "outcome": "accepted", "leader_id": leader_id,
+                "confirmation_timeout_ms": 30000, "result": result}
 
     if action == "leave":
         if member_id not in member_ids:
@@ -297,7 +332,12 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
         remaining_ids = [item for item in member_ids if item != member_id]
         if not remaining_ids:
             raise ValueError("At least one Sonos speaker must remain in the session")
+        # Explicit manual changes relinquish the old cleanup lease. Never guess
+        # that a surviving subset is still ours after a coordinator handoff.
+        TEMPORARY_GROUPS.forget(member_ids)
+        diagnostic("group_service_start", selected=player_id, target=member_id, action=action)
         result = client.command("players/cmd/ungroup", player_id=member_id)
+        diagnostic("group_service_accepted", selected=player_id, target=member_id, action=action)
         if member_id != leader_id:
             return {"accepted": True, "leader_id": leader_id, "result": result}
 
@@ -305,13 +345,14 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
         # ungrouped. Re-observe authoritative topology so the UI follows the
         # surviving session instead of staying attached to the removed leader.
         refreshed = get_players()
-        successor_id = remaining_ids[0]
-        for candidate_id in remaining_ids:
+        successor_id = None
+        for candidate_id in sorted(remaining_ids):
             try:
                 candidate_context = _sonos_group_context(candidate_id, refreshed)
             except ValueError:
                 continue
-            if candidate_context["leader_id"] in remaining_ids:
+            if (candidate_context["leader_id"] in remaining_ids
+                    and member_id not in candidate_context["member_ids"]):
                 successor_id = candidate_context["leader_id"]
                 break
         return {
@@ -323,6 +364,90 @@ def change_sonos_group(player_id: str, member_id: str, action: str) -> dict[str,
 
     raise ValueError("Invalid group action")
 
+
+
+def _cleanup_observation(member_ids: frozenset[str] | set[str]) -> Observation:
+    """Read fresh native topology/transport, requiring MA agreement and scope.
+
+    Use configured MA device addresses, not arbitrary discovery results. Native
+    SOAP queries have explicit timeouts and bypass SoCo's topology cache.
+    """
+    from soco import SoCo
+
+    raw = client.command("players/all")
+    if not isinstance(raw, list):
+        raise ValueError("Music Assistant topology unavailable")
+    players = [item for item in raw if isinstance(item, dict)]
+    by_id = {player.get("player_id"): player for player in players}
+    permanent_ids = {player.get("player_id") for player in players if player.get("type") == "group"}
+    groups, leaders, states = {}, {}, {}
+    protected = set()
+    for member_id in member_ids:
+        _require_allowed_destination(member_id, players)
+        player = by_id.get(member_id, {})
+        if (player.get("provider") != "sonos" or player.get("type") == "group"
+                or player.get("available") is not True):
+            raise ValueError("Cannot verify physical speaker availability")
+        source = player.get("active_source")
+        if source in permanent_ids or player.get("synced_to") in permanent_ids:
+            protected.add(member_id)
+        address = (player.get("device_info") or {}).get("ip_address")
+        if not address:
+            raise ValueError("Physical speaker address unavailable")
+        speaker = SoCo(address)
+        payload = speaker.zoneGroupTopology.GetZoneGroupState([], timeout=2)["ZoneGroupState"]
+        if len(payload) > 1024 * 1024:
+            raise ValueError("Sonos topology exceeds safety limit")
+        topology = ElementTree.fromstring(payload)
+        matches = []
+        for group in topology.iter("ZoneGroup"):
+            # Include satellites too: a bonded pair must not be mistaken for a solo.
+            ids = frozenset(node.attrib["UUID"] for node in group.iter()
+                            if node.tag in {"ZoneGroupMember", "Satellite"})
+            if member_id in ids:
+                matches.append((ids, group.attrib.get("Coordinator")))
+        if len(matches) != 1:
+            raise ValueError("Native Sonos group is ambiguous")
+        groups[member_id], leaders[member_id] = matches[0]
+        ma_context = _sonos_group_context(member_id, players)
+        if (ma_context["member_ids"] != set(groups[member_id])
+                or ma_context["leader_id"] != leaders[member_id]):
+            raise ValueError("Native and Music Assistant topology disagree")
+        transport = speaker.avTransport.GetTransportInfo([("InstanceID", 0)], timeout=2)
+        native_state = {
+            "PAUSED_PLAYBACK": "paused", "STOPPED": "idle", "NO_MEDIA_PRESENT": "off",
+        }.get(transport.get("CurrentTransportState"), "unknown")
+        states[member_id] = native_state if (
+            transport.get("CurrentTransportStatus") == "OK"
+            and player.get("state") in {"paused", "idle", "off"}
+        ) else "unknown"
+    return Observation(groups, leaders, states, protected)
+
+
+def _ownership_observation(member_ids: set[str]) -> Observation | None:
+    try:
+        return _cleanup_observation(member_ids)
+    except Exception:
+        # Failure to earn an automatic cleanup lease must not break manual grouping.
+        TEMPORARY_GROUPS.forget(member_ids)
+        diagnostic("cleanup_ownership_not_acquired", members=sorted(member_ids))
+        return None
+
+
+def _idle_cleanup_tick(stop: threading.Event | None = None) -> None:
+    with GROUP_LOCK:
+        TEMPORARY_GROUPS.tick(
+            _cleanup_observation,
+            lambda member: client.command("players/cmd/ungroup", player_id=member),
+            lambda phase, members: diagnostic(phase, members=members),
+            stop.is_set if stop is not None else lambda: False,
+        )
+
+
+def _idle_cleanup_worker(stop: threading.Event) -> None:
+    # One backend task. No browser dependency, no network traffic without leases.
+    while not stop.wait(30):
+        _idle_cleanup_tick(stop)
 
 
 def _name_tokens(value: str) -> set[str]:
@@ -483,11 +608,14 @@ def play_sonos_favorite(speaker: Any, favorite: Any) -> None:
 
 def _native_sonos_transport(queue_id: str, action: str) -> bool:
     """Use the physical player when MA is not actively managing its queue."""
+    REQUEST_CONTEXT.phase = "topology"
+    diagnostic("transport_topology_start", selected=queue_id, action=action)
     queues = get_queues()
     queue = next((q for q in queues if q.get("queue_id") == queue_id), None)
     players = get_players()
     player = next((p for p in players if p.get("player_id") == queue_id), None)
-    if action == "play" and player and player.get("state") == "idle":
+    if (action == "play" and player and player.get("state") == "idle"
+            and not player.get("synced_to")):
         return False
     if (
         queue_id not in NATIVE_SONOS_SESSIONS
@@ -503,6 +631,10 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
     )
     if speaker is None:
         return False
+    speaker = _verified_coordinator(speaker)
+    diagnostic("transport_topology_resolved", selected=queue_id, target=speaker.uid)
+    REQUEST_CONTEXT.phase = "native_service"
+    diagnostic("native_service_start", selected=queue_id, target=speaker.uid, action=action)
     try:
         getattr(speaker, action)()
     except Exception as err:
@@ -513,7 +645,20 @@ def _native_sonos_transport(queue_id: str, action: str) -> bool:
             NATIVE_SONOS_SESSIONS.discard(queue_id)
             return False
         raise
+    diagnostic("native_service_accepted", selected=queue_id, target=speaker.uid, action=action)
     return True
+
+
+def _verified_coordinator(speaker: Any) -> Any:
+    """Resolve only from observed native membership; never pick an arbitrary speaker."""
+    group = speaker.group
+    coordinator = getattr(group, "coordinator", None)
+    members = {member.uid for member in getattr(group, "members", [])}
+    if (coordinator is None or speaker.uid not in members or coordinator.uid not in members
+            or not coordinator.is_coordinator):
+        raise ValueError("Cannot verify current Sonos coordinator; refresh and try again")
+    _require_allowed_destination(coordinator.uid)
+    return coordinator
 
 
 def previous_transport(queue_id: str) -> dict[str, Any]:
@@ -547,6 +692,7 @@ def previous_transport(queue_id: str) -> dict[str, Any]:
     )
     if speaker is None:
         raise ValueError("Selected Sonos speaker is unavailable")
+    speaker = _verified_coordinator(speaker)
     # MA's current_media.elapsed_time can remain zero throughout playback.
     # Prefer the physical Sonos position; MA player.elapsed_time is a fallback.
     track = speaker.get_current_track_info() or {}
@@ -808,6 +954,9 @@ class Handler(BaseHTTPRequestHandler):
         body = _json_bytes(value)
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("X-Family-Music-Version", APP_VERSION)
+        if getattr(self, "request_id", None):
+            self.send_header("X-Family-Music-Request-ID", self.request_id)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -990,11 +1139,16 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET(self) -> None:
         path = urllib.parse.urlsplit(self.path).path
         try:
+            if path == "/api/info":
+                self._send_json({"frontend": "standalone", "version": APP_VERSION})
+                return
             if path == "/api/health":
                 players = get_players()
                 self._send_json(
                     {
                         "ok": True,
+                        "version": APP_VERSION,
+                        "frontend": "standalone",
                         "ma_url": MA_URL,
                         "token_configured": bool(MA_TOKEN),
                         "player_count": len(players),
@@ -1055,11 +1209,18 @@ class Handler(BaseHTTPRequestHandler):
             API_REQUEST_SLOTS.release()
 
     def _do_POST(self) -> None:
+        self.request_id = secrets.token_hex(8)
+        REQUEST_CONTEXT.phase = "validation"
         path = urllib.parse.urlsplit(self.path).path
         try:
             if not self._validate_write_request():
                 return
             body = self._read_json()
+            candidate = body.get("request_id", "")
+            if (isinstance(candidate, str) and len(candidate) <= 64
+                    and candidate.replace("-", "").isalnum()):
+                self.request_id = candidate
+            REQUEST_CONTEXT.request_id = self.request_id
             if path == "/api/play":
                 queue_id = str(body.get("queue_id") or "")
                 media = body.get("media")
@@ -1070,6 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     return
                 _require_allowed_destination(queue_id)
+                TEMPORARY_GROUPS.activity({queue_id})
                 if isinstance(media, str) and media.startswith("sonos-favorite://"):
                     play_native_sonos_favorite(queue_id, media)
                     result = {"sonos_direct": True}
@@ -1094,13 +1256,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not queue_id or not command:
                     self._send_json({"error": "invalid transport command"}, HTTPStatus.BAD_REQUEST)
                     return
+                diagnostic("transport_received", request_id=self.request_id,
+                           selected=queue_id, action=action)
                 _require_allowed_destination(queue_id)
+                if action == "play":
+                    TEMPORARY_GROUPS.activity({queue_id})
                 if action == "previous":
                     result = previous_transport(queue_id)
                 elif _native_sonos_transport(queue_id, action):
                     result = {"sonos_direct": True}
                 else:
+                    REQUEST_CONTEXT.phase = "ma_service"
+                    diagnostic("ma_service_start", selected=queue_id,
+                               target=queue_id, action=action)
                     result = client.command(command, queue_id=queue_id)
+                    diagnostic("ma_service_accepted", selected=queue_id,
+                               target=queue_id, action=action)
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/group-member":
@@ -1184,7 +1355,21 @@ class Handler(BaseHTTPRequestHandler):
         except AuthorizationError as err:
             self._send_json({"error": str(err)}, HTTPStatus.FORBIDDEN)
         except (MAError, ValueError, TypeError, json.JSONDecodeError) as err:
-            self._send_json({"error": str(err)}, HTTPStatus.BAD_GATEWAY)
+            diagnostic(f"{getattr(REQUEST_CONTEXT, 'phase', 'request')}_error",
+                       request_id=self.request_id, error_type=type(err).__name__)
+            self._send_json({"error": str(err)[:300], "request_id": self.request_id,
+                             "outcome": "rejected" if isinstance(err, (ValueError, TypeError))
+                             else "unknown"},
+                            HTTPStatus.BAD_GATEWAY)
+        except Exception as err:
+            # SoCo exceptions are not MAError. Previously these escaped the
+            # handler, closed the origin connection and became a proxy 502.
+            diagnostic(f"{getattr(REQUEST_CONTEXT, 'phase', 'native_request')}_error",
+                       request_id=self.request_id, error_type=type(err).__name__)
+            self._send_json({"error": "Sonos command failed; outcome may be unknown. "
+                             "Refresh before retrying.", "request_id": self.request_id,
+                             "outcome": "unknown"},
+                            HTTPStatus.BAD_GATEWAY)
 
     def _serve_static(self, path: str) -> None:
         relative = "index.html" if path in ("", "/") else path.lstrip("/")
@@ -1233,10 +1418,17 @@ def main() -> None:
 
     signal.signal(signal.SIGTERM, stop_server)
     signal.signal(signal.SIGINT, stop_server)
+    cleanup_stop = threading.Event()
+    cleanup_worker = threading.Thread(target=_idle_cleanup_worker, args=(cleanup_stop,),
+                                      name="family-music-idle-cleanup", daemon=True)
+    cleanup_worker.start()
     try:
         server.serve_forever(poll_interval=0.1)
     finally:
+        cleanup_stop.set()
         server.server_close()
+        # In-flight SOAP/MA calls are bounded; never delay container shutdown.
+        cleanup_worker.join(timeout=1)
         print("Family Music shutdown complete", flush=True)
 
 

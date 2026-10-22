@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -678,15 +679,15 @@ async def ws_group_member(hass: HomeAssistant, connection, msg: dict) -> None:
                     if isinstance(raw_after, list)
                     else []
                 )
-                selected_player_id = remaining_ids[0]
-                for candidate_id in remaining_ids:
+                for candidate_id in sorted(remaining_ids):
                     try:
                         candidate_context = _ma_sonos_group_context(
                             players_after, candidate_id
                         )
                     except ValueError:
                         continue
-                    if candidate_context["leader_id"] in remaining_ids:
+                    if (candidate_context["leader_id"] in remaining_ids
+                            and member_id not in candidate_context["member_ids"]):
                         selected_player_id = candidate_context["leader_id"]
                         break
     except ValueError as err:
@@ -899,6 +900,7 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
         vol.Optional("target"): str,
         vol.Optional("error"): str,
         vol.Optional("version"): str,
+        vol.Optional("correlation_id", default=""): vol.All(str, vol.Length(max=64)),
     }
 )
 @websocket_api.async_response
@@ -911,12 +913,21 @@ async def ws_client_diagnostic(hass: HomeAssistant, connection, msg: dict) -> No
     selected = msg.get("selected", "")
     if selected and not _require_entity_permission(connection, msg, selected, control=False):
         return
+    rate = hass.data.setdefault(DOMAIN, {}).setdefault("diagnostic_rate", [0.0, 0])
+    now = time.monotonic()
+    if now - rate[0] >= 60:
+        rate[:] = [now, 0]
+    if rate[1] >= 60:
+        connection.send_result(msg["id"], {"recorded": False, "backend_version": VERSION})
+        return
+    rate[1] += 1
     _LOGGER.warning(
-        "PWA playback: version=%s phase=%s selected=%s target=%s error=%s",
+        "PWA playback: ref=%s version=%s phase=%s selected=%s target=%s error=%s",
+        msg.get("correlation_id", "")[:64],
         msg.get("version", "")[:30], msg["phase"][:60],
         selected[:120], msg.get("target", "")[:120], msg.get("error", "")[:300],
     )
-    connection.send_result(msg["id"], {"recorded": True})
+    connection.send_result(msg["id"], {"recorded": True, "backend_version": VERSION})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

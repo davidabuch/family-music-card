@@ -1,4 +1,5 @@
-const CARD_VERSION = "0.3.28";
+const CARD_VERSION = "0.3.29";
+const GROUP_CONFIRM_MS = 30000;
 
 class FamilyMusicCard extends HTMLElement {
   constructor() {
@@ -51,6 +52,8 @@ class FamilyMusicCard extends HTMLElement {
     this._groupTopologyFor = null;
     this._groupTopologyLoading = false;
     this._pendingGroupChange = null;
+    this._transportInFlight = false;
+    this._diagnosticStatus = "Backend diagnostics not checked";
   }
 
   setConfig(config) {
@@ -75,6 +78,10 @@ class FamilyMusicCard extends HTMLElement {
       this._selectedPlayer =
         this._config.players.find((entityId) => hass.states[entityId]) ||
         this._config.players[0];
+    }
+    if (!this._diagnosticProbeStarted) {
+      this._diagnosticProbeStarted = true;
+      void this._reportPlaybackDiagnostic("client_loaded", this._selectedPlayer);
     }
     this._syncPlayerSelector();
     this._loadNativePlayerPeers();
@@ -143,6 +150,15 @@ class FamilyMusicCard extends HTMLElement {
     return (item?.artists || []).map((artist) => artist.name).filter(Boolean).join(", ");
   }
 
+  async _within(promise, milliseconds) {
+    let timer;
+    try {
+      return await Promise.race([promise, new Promise((_, reject) => {
+        timer = window.setTimeout(() => reject(new Error("Response timed out; outcome unknown")), milliseconds);
+      })]);
+    } finally { window.clearTimeout(timer); }
+  }
+
   async _ws(type, payload = {}) {
     if (!this._hass) throw new Error("Home Assistant is not available");
     return this._hass.connection.sendMessagePromise({
@@ -188,48 +204,32 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
-  async _loadGroupTopology(force = false) {
-    if (!this._selectedPlayer || !this._hass || this._isSelectedGroup()) {
-      this._groupTopology = null;
-      this._groupTopologyFor = this._selectedPlayer;
-      this._groupTopologyLoading = false;
-      return;
-    }
-    if (!force && this._groupTopologyFor === this._selectedPlayer) return;
-    if (this._groupTopologyLoading) return;
-    const player = this._selectedPlayer;
+  async _loadGroupTopology(force = false, player = this._selectedPlayer) {
+    if (!player || !this._hass || this._hass.states[player]?.attributes?.mass_player_type === "group") return null;
+    if (!force && this._groupTopologyFor === player) return this._groupTopology;
+    if (this._groupTopologyRequest?.player === player) return this._groupTopologyRequest.promise;
     this._groupTopologyLoading = true;
-    if (this._moreOpen) this._renderNowOverlays();
-    try {
-      const topology = await this._ws("family_music/group_topology", {
-        player_entity_id: player,
-      });
-      if (this._selectedPlayer === player) {
-        this._groupTopology = topology?.available ? topology : null;
-        this._groupTopologyFor = player;
-        if (this._groupTopology) this._initializeSpeakerBalance();
-        if (this._pendingGroupChange && this._groupTopology) {
-          const member = this._groupTopology.speakers?.find(
-            (item) => item.player_id === this._pendingGroupChange.memberPlayerId
-          );
-          const confirmed = Boolean(member?.member) ===
-            (this._pendingGroupChange.action === "join");
-          if (confirmed || Date.now() >= this._pendingGroupChange.until) {
-            this._pendingGroupChange = null;
-          }
+    const promise = (async () => {
+      try {
+        const topology = await this._within(this._ws("family_music/group_topology", {player_entity_id: player}), 10000);
+        const fresh = topology?.available && Array.isArray(topology.speakers) ? topology : null;
+        if (this._selectedPlayer === player) {
+          this._groupTopology = fresh;
+          this._groupTopologyFor = player;
+          if (fresh) this._initializeSpeakerBalance();
         }
+        return fresh;
+      } catch (error) {
+        this._traceTransport("group_topology_error", {error: String(error).slice(0, 180)});
+        return null;
+      } finally {
+        if (this._groupTopologyRequest?.promise === promise) this._groupTopologyRequest = null;
+        this._groupTopologyLoading = false;
+        if (this._view === "now" && this._selectedPlayer === player && this._moreOpen) this._renderNowOverlays();
       }
-    } catch (_error) {
-      if (this._selectedPlayer === player) {
-        this._groupTopology = null;
-        this._groupTopologyFor = player;
-      }
-    } finally {
-      this._groupTopologyLoading = false;
-      if (this._view === "now" && this._selectedPlayer === player && this._moreOpen) {
-        this._renderNowOverlays();
-      }
-    }
+    })();
+    this._groupTopologyRequest = {player, promise};
+    return promise;
   }
 
   _dynamicGroupMarkup() {
@@ -269,8 +269,7 @@ class FamilyMusicCard extends HTMLElement {
       <div class="balance-help">Add or remove speakers from this synchronized Sonos session.</div>
       <div class="dynamic-group-list">
         ${speakers.map((speaker) => {
-          const pending = this._pendingGroupChange?.memberPlayerId === speaker.player_id
-            && Date.now() < this._pendingGroupChange.until;
+          const pending = this._pendingGroupChange?.memberPlayerId === speaker.player_id;
           const member = pending
             ? this._pendingGroupChange.action === "join"
             : Boolean(speaker.member);
@@ -301,61 +300,67 @@ class FamilyMusicCard extends HTMLElement {
     `;
   }
 
-  async _waitForDynamicGroupConfirmation(memberPlayerId, action) {
-    const expected = action === "join";
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      this._groupTopologyFor = null;
-      await this._loadGroupTopology(true);
-      const member = this._groupTopology?.speakers?.find(
-        (item) => item.player_id === memberPlayerId
-      );
-      if (Boolean(member?.member) === expected) {
+  async _waitForDynamicGroupConfirmation(memberPlayerId, action, operation = this._pendingGroupChange) {
+    if (!operation) return false;
+    while (Date.now() < operation.until) {
+      let topology;
+      try {
+        topology = await this._within(this._loadGroupTopology(true, operation.anchorEntityId), Math.max(1, operation.until - Date.now()));
+      } catch (_) { break; }
+      const member = topology?.speakers?.find((item) => item.player_id === memberPlayerId);
+      const leader = topology?.speakers?.find((item) => item.player_id === topology.leader_id && item.coordinator && item.member && item.available);
+      const expected = action === "join";
+      if (topology && leader && member && member.available && Boolean(member.member) === expected) {
+        if (operation.followSuccessor && this._selectedPlayer === operation.selected) {
+          this._selectedPlayer = leader.entity_id;
+          localStorage.setItem("family-music-card-player", this._selectedPlayer);
+        }
         this._pendingGroupChange = null;
         this._renderNowOverlays();
         return true;
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
     }
     return false;
   }
 
   async _toggleDynamicGroupMember(memberPlayerId) {
     if (!memberPlayerId || !this._selectedPlayer || this._pendingGroupChange) return;
-    const speaker = this._groupTopology?.speakers?.find(
-      (item) => item.player_id === memberPlayerId
-    );
+    const speaker = this._groupTopology?.speakers?.find((item) => item.player_id === memberPlayerId);
     if (!speaker || !speaker.available) return;
-    const members = this._groupTopology?.speakers?.filter((item) => item.member) || [];
+    const members = this._groupTopology.speakers.filter((item) => item.member);
     const action = speaker.member ? "leave" : "join";
     if (action === "leave" && members.length <= 1) return;
-    this._pendingGroupChange = {
-      memberPlayerId,
-      action,
-      until: Date.now() + 7000,
-    };
+    const operation = {memberPlayerId, action, selected: this._selectedPlayer,
+      anchorEntityId: action === "leave" && speaker.coordinator
+        ? members.find((item) => item.player_id !== memberPlayerId)?.entity_id : this._selectedPlayer,
+      followSuccessor: action === "leave" && speaker.coordinator, until: Infinity};
+    this._pendingGroupChange = operation;
     this._renderNowOverlays();
     try {
-      const result = await this._ws("family_music/group_member", {
-        player_entity_id: this._selectedPlayer,
-        member_player_id: memberPlayerId,
-        action,
-      });
-      if (result?.selected_player_entity_id) {
-        this._selectedPlayer = result.selected_player_entity_id;
-        localStorage.setItem("family-music-card-player", this._selectedPlayer);
-      }
-      const confirmed = await this._waitForDynamicGroupConfirmation(
-        memberPlayerId,
-        action
-      );
-      if (!confirmed) {
+      operation.outcome = "sending";
+      await this._within(this._ws("family_music/group_member", {
+        player_entity_id: operation.selected, member_player_id: memberPlayerId, action,
+      }), 30000);
+      operation.outcome = "accepted";
+      this._showActionMessage("Group command accepted; waiting for speakers…");
+    } catch (error) {
+      if (["invalid_group_change", "invalid_player", "unauthorized"].includes(error?.code)) {
+        operation.outcome = "rejected";
         this._pendingGroupChange = null;
+        this._showActionMessage(`Group change rejected: ${error?.message || error}`);
         this._renderNowOverlays();
+        return;
       }
-    } catch (_error) {
-      this._pendingGroupChange = null;
-      this._renderNowOverlays();
+      operation.outcome = "unknown";
+      this._showActionMessage("Group command response unavailable; checking actual topology…");
     }
+    operation.until = Date.now() + GROUP_CONFIRM_MS;
+    const confirmed = await this._waitForDynamicGroupConfirmation(memberPlayerId, action, operation);
+    this._pendingGroupChange = null;
+    operation.outcome = confirmed ? "confirmed" : "unknown";
+    this._showActionMessage(confirmed ? "Group change confirmed" : "Group outcome unknown; refresh topology before retrying");
+    this._renderNowOverlays();
   }
 
   _destinationIsPlaying(entityId) {
@@ -856,6 +861,10 @@ class FamilyMusicCard extends HTMLElement {
               <div class="progress-time"><span id="elapsed">0:00</span><span id="remaining">-0:00</span></div>
             </div>
 
+            <div id="actionStatus" role="status" aria-live="polite">${this._escape(this._actionMessage || "")}</div>
+            <details class="diagnostic-panel"><summary>About &amp; diagnostics</summary>
+              <p>HA card ${CARD_VERSION}</p><p id="diagnosticStatus">${this._escape(this._diagnosticStatus)}</p>
+            </details>
             <div class="transport">
               <button id="shuffleToggle" class="mode-button" aria-label="Shuffle" title="Shuffle">
                 <ha-icon icon="mdi:shuffle"></ha-icon>
@@ -1242,19 +1251,78 @@ class FamilyMusicCard extends HTMLElement {
     }
   }
 
-  _reportPlaybackDiagnostic(phase, selected, target = "", error = "") {
-    this._ws("family_music/client_diagnostic", {
-      phase, selected, target, error, version: CARD_VERSION,
-    }).catch(() => {});
+  async _reportPlaybackDiagnostic(phase, selected, target = "", error = "", actionId = "") {
+    try {
+      const result = await this._within(this._ws("family_music/client_diagnostic", {
+        phase, selected, target, error: String(error).slice(0, 180), version: CARD_VERSION,
+        correlation_id: actionId,
+      }), 2000);
+      this._diagnosticStatus = result.recorded
+        ? `HA backend ${result.backend_version || "older version"}; diagnostics acknowledged`
+        : "Backend diagnostics rate limited; local trace retained";
+    } catch (failure) {
+      this._diagnosticStatus = "Backend diagnostics unavailable; local trace retained";
+      if (!this._diagnosticWarningShown) {
+        console.warn("Family Music diagnostic command unavailable", failure?.code || failure?.name);
+        this._diagnosticWarningShown = true;
+      }
+    }
+    const status = this.shadowRoot.getElementById("diagnosticStatus");
+    if (status) status.textContent = this._diagnosticStatus;
   }
 
-  async _resolveTransportTarget(selectedPlayer) {
+  _showActionMessage(message) {
+    this._actionMessage = String(message).slice(0, 350);
+    const status = this.shadowRoot.getElementById("actionStatus");
+    if (status) status.textContent = this._actionMessage;
+  }
+
+  async _togglePlayback() {
+    if (!this._selectedPlayer || !this._hass || this._transportInFlight) return;
+    const selected = this._selectedPlayer;
+    const actionId = crypto.randomUUID();
+    let target = "";
+    let phase = "topology";
+    this._transportInFlight = true;
+    this._traceTransport("button_click", {selected, actionId});
+    void this._reportPlaybackDiagnostic("button_click", selected, "", "", actionId);
+    try {
+      target = await this._resolveTransportTarget(selected, actionId);
+      if (this._selectedPlayer !== selected) return;
+      const actualState = this._hass.states[target]?.state;
+      if (!["playing", "paused", "idle", "off"].includes(actualState)) throw new Error("Playback state is unavailable or transitional");
+      const targetState = actualState === "playing" ? "paused" : "playing";
+      const service = targetState === "playing" ? "media_play" : "media_pause";
+      phase = "service";
+      this._optimisticPlayback = targetState;
+      this._optimisticPlaybackUntil = Date.now() + 1800;
+      this._updateNowPlaying();
+      this._traceTransport("service_start", {service, target, actionId});
+      void this._reportPlaybackDiagnostic("service_start", selected, target, "", actionId);
+      await this._within(this._hass.callService("media_player", service, {entity_id: target}), 15000);
+      this._traceTransport("service_accepted", {service, target, actionId});
+      void this._reportPlaybackDiagnostic("service_accepted", selected, target, "", actionId);
+    } catch (error) {
+      this._optimisticPlayback = null;
+      this._optimisticPlaybackUntil = 0;
+      this._traceTransport("playback_error", {phase, target, actionId, error: String(error).slice(0, 180)});
+      void this._reportPlaybackDiagnostic(`${phase}_error`, selected, target, error, actionId);
+      this._showActionMessage(`Playback ${phase} failed: ${error?.message || error} (ref ${actionId})`);
+      this._updateNowPlaying();
+    } finally {
+      this._transportInFlight = false;
+    }
+  }
+
+  async _resolveTransportTarget(selectedPlayer, actionId = "") {
+    void this._reportPlaybackDiagnostic("topology_start", selectedPlayer, "", "", actionId);
     this._traceTransport("resolve_start", {
       state: this._hass?.states?.[selectedPlayer]?.state,
       group_members: this._hass?.states?.[selectedPlayer]?.attributes?.group_members,
       active_queue: this._hass?.states?.[selectedPlayer]?.attributes?.active_queue,
     });
-    if (!selectedPlayer || !this._hass?.states?.[selectedPlayer]) {
+    if (!selectedPlayer || !this._hass?.states?.[selectedPlayer]
+        || ["unavailable", "unknown"].includes(this._hass.states[selectedPlayer].state)) {
       throw new Error("Selected speaker is unavailable");
     }
     if (this._hass.states[selectedPlayer].attributes?.mass_player_type === "group") {
@@ -1263,9 +1331,9 @@ class FamilyMusicCard extends HTMLElement {
     // Query current Sonos coordinator for EVERY command, not the cached group UI.
     let topology;
     try {
-      topology = await this._ws("family_music/group_topology", {
+      topology = await this._within(this._ws("family_music/group_topology", {
         player_entity_id: selectedPlayer,
-      });
+      }), 10000);
       this._traceTransport("topology_result", {
         available: topology?.available,
         leader_id: topology?.leader_id,
@@ -1292,24 +1360,30 @@ class FamilyMusicCard extends HTMLElement {
         !leader.entity_id || !this._hass.states[leader.entity_id]) {
       throw new Error("Sonos group coordinator is unavailable or inconsistent");
     }
-    this._traceTransport("resolved", { target: leader.entity_id });
+    if (["unavailable", "unknown"].includes(this._hass.states[leader.entity_id].state)) {
+      throw new Error("Sonos group coordinator entity is unavailable");
+    }
+    this._traceTransport("resolved", { target: leader.entity_id, actionId });
+    void this._reportPlaybackDiagnostic("resolved", selectedPlayer, leader.entity_id, "", actionId);
     return leader.entity_id;
   }
 
   async _skipTrack(direction) {
     if (!this._selectedPlayer || !this._hass) return;
     const selected = this._selectedPlayer;
+    const actionId = crypto.randomUUID();
     const buttonId = direction === "next" ? "next" : "prev";
     const service = direction === "next" ? "media_next_track" : "media_previous_track";
     const button = this.shadowRoot.getElementById(buttonId);
     button?.setAttribute("aria-busy", "true");
     try {
-      const target = await this._resolveTransportTarget(selected);
+      const target = await this._resolveTransportTarget(selected, actionId);
       if (this._selectedPlayer !== selected) return;
-      this._traceTransport("service_start", { service, target });
-          this._reportPlaybackDiagnostic("service_start", selected, target);
+      this._traceTransport("service_start", { service, target, actionId });
+      void this._reportPlaybackDiagnostic("service_start", selected, target, "", actionId);
       await this._hass.callService("media_player", service, { entity_id: target });
-      this._traceTransport("service_accepted", { service, target });
+      this._traceTransport("service_accepted", { service, target, actionId });
+      void this._reportPlaybackDiagnostic("service_accepted", selected, target, "", actionId);
       button?.classList.add("accepted");
       window.setTimeout(() => button?.classList.remove("accepted"), 500);
     } catch (error) {
@@ -1442,39 +1516,7 @@ class FamilyMusicCard extends HTMLElement {
       this._skipTrack("next");
     });
     this.shadowRoot.getElementById("playPause")?.addEventListener("click", () => {
-      if (!this._selectedPlayer) return;
-      const actualState = this._hass?.states?.[this._selectedPlayer]?.state;
-      const effectiveState =
-        this._optimisticPlayback && Date.now() < this._optimisticPlaybackUntil
-          ? this._optimisticPlayback
-          : actualState;
-      const targetState = effectiveState === "playing" ? "paused" : "playing";
-      this._optimisticPlayback = targetState;
-      this._optimisticPlaybackUntil = Date.now() + 1800;
-      const button = this.shadowRoot.getElementById("playPause");
-      if (button) {
-        button.innerHTML = `<ha-icon icon="${targetState === "playing" ? "mdi:pause" : "mdi:play"}"></ha-icon>`;
-      }
-      const selected = this._selectedPlayer;
-      this._traceTransport("button_click", { targetState, actualState });
-      this._reportPlaybackDiagnostic("button_click", selected);
-      this._resolveTransportTarget(selected)
-        .then((target) => {
-          if (this._selectedPlayer !== selected) return;
-          const service = targetState === "playing" ? "media_play" : "media_pause";
-          this._traceTransport("service_start", { service, target });
-          return this._hass.callService("media_player", service, { entity_id: target })
-            .then(() => this._traceTransport("service_accepted", { service, target }));
-
-        })
-        .catch((error) => {
-          this._traceTransport("playback_error", { error: String(error) });
-          this._reportPlaybackDiagnostic("playback_error", selected, "", String(error));
-          console.error("Family Music group playback control failed:", error);
-          this._optimisticPlayback = null;
-          this._optimisticPlaybackUntil = 0;
-          this._updateNowPlaying();
-        });
+      void this._togglePlayback();
     });
     const progress = this.shadowRoot.getElementById("trackProgress");
     progress?.addEventListener("input", (event) => {

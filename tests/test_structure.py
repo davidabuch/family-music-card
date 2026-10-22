@@ -9,7 +9,7 @@ def test_manifest_and_card_exist():
     card_path = ROOT / "custom_components" / "family_music" / "www" / "family-music-card.js"
     manifest = json.loads(manifest_path.read_text())
     assert manifest["domain"] == "family_music"
-    assert manifest["version"] == "0.3.28"
+    assert manifest["version"] == "0.3.29"
     assert card_path.exists()
 
 
@@ -521,7 +521,7 @@ def test_ha_card_dynamic_group_can_remove_coordinator_and_balance_members():
     assert "Current playback · tap to remove" in card_text
     assert "_balanceMembers()" in card_text
     assert "without switching speakers" in card_text
-    assert "result?.selected_player_entity_id" in card_text
+    assert "this._selectedPlayer = leader.entity_id" in card_text
     assert 'localStorage.setItem("family-music-card-player"' in card_text
 
 
@@ -531,8 +531,8 @@ def test_ha_card_group_popup_waits_for_authoritative_membership_without_reopen()
     ).read_text()
 
     assert "_waitForDynamicGroupConfirmation" in card_text
-    assert "for (let attempt = 0; attempt < 10; attempt += 1)" in card_text
-    assert "Boolean(member?.member) === expected" in card_text
+    assert "while (Date.now() < operation.until)" in card_text
+    assert "member && member.available && Boolean(member.member) === expected" in card_text
     assert "this._renderNowOverlays()" in card_text
 
 
