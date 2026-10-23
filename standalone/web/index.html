@@ -9,13 +9,14 @@
   <meta name="apple-mobile-web-app-title" content="Family Music">
   <title>Family Music</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=0.2.63">
+  <link rel="stylesheet" href="/styles.css?v=0.2.64">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/approved-v2/icon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/icons/approved-v2/icon-16.png"><link rel="shortcut icon" href="/favicon.ico"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=approved-v2"><link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=approved-v2"></head>
 <body>
   <main id="app" class="app-shell">
     <section id="nowView" class="view active">
       <div class="now-card">
-        <div id="artwork" class="artwork"><span>♪</span></div>
+        <div id="artwork" class="artwork" aria-label="Hold for one second to show track list"><span>♪</span></div>
+        <div id="trackListPanel" class="track-list-panel" hidden aria-label="Current queue tracks"></div>
         <div class="track-copy">
           <h1 id="trackTitle">Nothing playing</h1>
           <p id="trackMeta">—</p>
@@ -77,6 +78,6 @@
     </details>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
-  <script src="/app.js?v=0.2.63" defer></script>
+  <script src="/app.js?v=0.2.64" defer></script>
 </body>
 </html>

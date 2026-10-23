@@ -55,7 +55,7 @@ PLAYER_ALLOWLIST = {
 NATIVE_SONOS_SESSIONS: set[str] = set()
 GROUP_LOCK = threading.RLock()
 TEMPORARY_GROUPS = TemporaryGroups()
-APP_VERSION = "0.2.63"
+APP_VERSION = "0.2.64"
 REQUEST_CONTEXT = threading.local()
 _LOGGER = logging.getLogger("family_music.standalone")
 
@@ -1284,6 +1284,29 @@ class Handler(BaseHTTPRequestHandler):
                     "queuesReadMs": round((time.monotonic() - players_done) * 1000),
                 }})
                 return
+            if path == "/api/queue-tracks":
+                queue_id = self._query().get("queue_id", [""])[0]
+                if not queue_id:
+                    self._send_json({"error": "queue_id is required"}, HTTPStatus.BAD_REQUEST)
+                    return
+                _require_allowed_destination(queue_id)
+                queues = get_queues()
+                if not any(q.get("queue_id") == queue_id for q in queues):
+                    self._send_json({"error": "Queue unavailable"}, HTTPStatus.BAD_REQUEST)
+                    return
+                raw = client.command("player_queues/items", queue_id=queue_id,
+                                     limit=200, offset=0)
+                items = raw if isinstance(raw, list) else []
+                self._send_json({"items": [
+                    {"index": index, "queue_item_id": item.get("queue_item_id"),
+                     "name": (item.get("media_item") or {}).get("name") or item.get("name"),
+                     "artists": [a.get("name") for a in
+                                 ((item.get("media_item") or {}).get("artists") or [])
+                                 if isinstance(a, dict)],
+                     "uri": (item.get("media_item") or {}).get("uri")}
+                    for index, item in enumerate(items) if isinstance(item, dict)
+                ], "truncated": len(items) >= 200})
+                return
             if path == "/api/native-modes":
                 queue_id = self._query().get("queue_id", [""])[0]
                 if queue_id:
@@ -1370,6 +1393,25 @@ class Handler(BaseHTTPRequestHandler):
                         media=media,
                     )
                     NATIVE_SONOS_SESSIONS.discard(queue_id)
+                self._send_json({"ok": True, "result": result})
+                return
+            if path == "/api/play-queue-index":
+                queue_id = str(body.get("queue_id") or "")
+                index = body.get("index")
+                if not queue_id or type(index) is not int or not 0 <= index < 200:
+                    self._send_json(
+                        {"error": "Invalid queue or track index"}, HTTPStatus.BAD_REQUEST
+                    )
+                    return
+                _require_allowed_destination(queue_id)
+                queues = get_queues()
+                if not any(q.get("queue_id") == queue_id and
+                           q.get("state") in {"playing", "paused"} for q in queues):
+                    self._send_json({"error": "Active queue unavailable"}, HTTPStatus.BAD_REQUEST)
+                    return
+                TEMPORARY_GROUPS.activity({queue_id})
+                result = client.command("player_queues/play_index", queue_id=queue_id,
+                                        index=index)
                 self._send_json({"ok": True, "result": result})
                 return
             if path == "/api/transport":

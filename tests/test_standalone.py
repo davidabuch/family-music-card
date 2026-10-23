@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.63"' in app_config
+    assert 'version: "0.2.64"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1259,3 +1259,20 @@ def test_personal_favorite_track_rejects_ambiguous_same_service_mapping():
     assert not standalone._unambiguous_personal_track(
         {"provider_instances": []}, "apple_music--qpuX24cG",
     )
+
+
+def test_artwork_track_list_ui_and_safe_routing():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "standalone"
+    html = (root / "web/index.html").read_text()
+    js = (root / "web/app.js").read_text()
+    server = (root / "server.py").read_text()
+    assert 'id="trackListPanel"' in html
+    assert '}, 1000);' in js
+    assert 'nowTrackContext(selectedPlayer(), selectedQueue())' in js
+    assert 'function closeTrackList()' in js
+    assert 'if (!maQueueActive(queue, player))' in js
+    assert '"/api/queue-tracks"' in server
+    assert '"/api/play-queue-index"' in server
+    assert 'player_queues/play_index' in server
+    assert '_require_allowed_destination(queue_id)' in server

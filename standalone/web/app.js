@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.63";
+const APP_VERSION = "0.2.64";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -24,6 +24,12 @@ const state = {
   stateAvailable: true,
   reconciliations: new Map(),
   volumeDragging: false,
+  trackListOpen: false,
+  trackListContext: null,
+  trackListItems: [],
+  trackListSignature: null,
+  trackListRequest: 0,
+  artworkHoldTimer: null,
   lastObservation: null,
   pendingMute: null,
   pendingVolume: null,
@@ -306,6 +312,7 @@ function renderWholeHouse() {
   body.querySelectorAll("[data-house-player]").forEach(button => button.addEventListener("click", () => {
     const id = button.dataset.housePlayer;
     if (!state.players.some(player => player.player_id === id)) return;
+    closeTrackList();
     state.selectedPlayerId = id;
     localStorage.setItem("family-music-player-id", id);
     setView("now");
@@ -389,9 +396,102 @@ function effectiveVolume(player) {
   return Number.isFinite(Number(raw)) ? Math.round(Number(raw)) : 0;
 }
 
+function nowTrackContext(player, queue) {
+  if (!player) return null;
+  const active = maQueueActive(queue, player);
+  const media = active ? queue?.current_item?.media_item : player.current_media;
+  // Album identity survives individual track advancement; queue/source changes
+  // reset the list. Non-album sources retain their queue identity.
+  const collection = media?.album?.uri || media?.album?.name ||
+    queue?.radio_source?.uri || queue?.radio_source?.name ||
+    queue?.current_item?.media_item?.media_type || "queue";
+  return [player.player_id, player.active_source || "", active ? queue.queue_id : "native",
+    collection].join("|");
+}
+
+function closeTrackList() {
+  state.trackListOpen = false;
+  state.trackListItems = [];
+  state.trackListSignature = null;
+  state.trackListRequest++;
+}
+
+async function openTrackList() {
+  const player = selectedPlayer();
+  const queue = selectedQueue();
+  if (!maQueueActive(queue, player)) {
+    showToast("Song list unavailable for this Sonos source", 2500);
+    return;
+  }
+  const context = nowTrackContext(player, queue);
+  state.trackListContext = context;
+  state.trackListOpen = true;
+  state.trackListItems = [];
+  state.trackListSignature = null;
+  const request = ++state.trackListRequest;
+  renderNow();
+  try {
+    const data = await api("/api/queue-tracks?queue_id=" + encodeURIComponent(queue.queue_id));
+    if (request !== state.trackListRequest || !state.trackListOpen ||
+        nowTrackContext(selectedPlayer(), selectedQueue()) !== context) return;
+    state.trackListItems = data.items || [];
+    state.trackListSignature = null;
+    renderNow();
+  } catch (error) {
+    if (request === state.trackListRequest) {
+      closeTrackList();
+      renderNow();
+      showToast(error.message, 3000);
+    }
+  }
+}
+
+function renderTrackList(queue) {
+  const panel = $("#trackListPanel");
+  const art = $("#artwork");
+  art.hidden = state.trackListOpen;
+  panel.hidden = !state.trackListOpen;
+  if (!state.trackListOpen) return;
+  const activeId = queue?.current_item?.queue_item_id;
+  const signature = JSON.stringify([state.trackListItems, activeId]);
+  if (signature === state.trackListSignature) return;
+  state.trackListSignature = signature;
+  panel.innerHTML = '<div class="track-list-header"><strong>Up Next</strong>' +
+    '<button id="backToArtwork" type="button" aria-label="Back to artwork" title="Back to artwork">▣</button></div>' +
+    (state.trackListItems.length
+      ? '<div class="track-list-scroll">' + state.trackListItems.map((item) =>
+        '<button class="track-list-row' +
+        (item.queue_item_id && item.queue_item_id === activeId ? ' current' : '') +
+        '" type="button" data-index="' + item.index + '">' +
+        '<span class="track-number">' + (item.index + 1) + '</span><span class="track-detail"><strong>' +
+        escapeHtml(item.name || "Unknown track") + '</strong><small>' +
+        escapeHtml((item.artists || []).join(", ")) + '</small></span></button>'
+      ).join("") + '</div>'
+      : '<div class="track-list-empty">Loading tracks, or no track list available…</div>');
+  $("#backToArtwork").addEventListener("click", () => { closeTrackList(); renderNow(); });
+  panel.querySelectorAll(".track-list-row").forEach(button => {
+    button.addEventListener("click", async () => {
+      const current = selectedQueue();
+      if (!maQueueActive(current, selectedPlayer()) ||
+          nowTrackContext(selectedPlayer(), current) !== state.trackListContext) {
+        closeTrackList(); renderNow(); return;
+      }
+      button.disabled = true;
+      try {
+        await api("/api/play-queue-index", {method:"POST",
+          body:JSON.stringify({queue_id:current.queue_id,index:Number(button.dataset.index)})});
+        await refreshState();
+      } catch (error) { showToast(error.message, 3000); }
+      finally { button.disabled = false; }
+    });
+  });
+}
+
 function renderNow() {
   const player = selectedPlayer();
   const queue = selectedQueue();
+  const trackContext = nowTrackContext(player, queue);
+  if (state.trackListOpen && trackContext !== state.trackListContext) closeTrackList();
   // Music Assistant may retain the last queue item after a Sonos-native
   // station/source change. In that case the player media is authoritative.
   const queueActive = maQueueActive(queue, player) && queue.state === observedPlayback(player);
@@ -410,6 +510,8 @@ function renderNow() {
     img.dataset.artworkSource = image;
     img.onerror = () => { void recoverSonosArtwork(img, item, image); };
   }
+
+  renderTrackList(queue);
 
   const playback = observedPlayback(player);
   const playing = playback === "playing";
@@ -1083,6 +1185,7 @@ function renderDestinationOverlay() {
   $("#overlay").innerHTML = `<button class="scrim" aria-label="Close"></button><div class="popover"><h3>Play in</h3>${options}</div>`;
   $(".scrim").addEventListener("click", closeOverlay);
   document.querySelectorAll("[data-player]").forEach((button) => button.addEventListener("click", () => {
+    closeTrackList();
     state.selectedPlayerId = button.dataset.player;
     localStorage.setItem("family-music-player-id", state.selectedPlayerId);
     closeOverlay(); renderNow();
@@ -1449,6 +1552,23 @@ function wire() {
   $("#previous").addEventListener("click",(event)=>transport("previous",event.currentTarget));
   $("#next").addEventListener("click",(event)=>transport("next",event.currentTarget));
   $("#playPause").addEventListener("click",(event)=>transport(observedPlayback()==="playing"?"pause":"play",event.currentTarget));
+  const artwork = $("#artwork");
+  const cancelArtworkHold = () => {
+    if (state.artworkHoldTimer) clearTimeout(state.artworkHoldTimer);
+    state.artworkHoldTimer = null;
+  };
+  artwork.addEventListener("pointerdown", event => {
+    if (event.button !== 0) return;
+    cancelArtworkHold();
+    state.artworkHoldTimer = window.setTimeout(() => {
+      state.artworkHoldTimer = null;
+      void openTrackList();
+    }, 1000);
+  });
+  for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
+    artwork.addEventListener(event, cancelArtworkHold);
+  }
+  artwork.addEventListener("contextmenu", event => event.preventDefault());
   $("#shuffle").addEventListener("click",toggleShuffle);
   $("#repeat").addEventListener("click",toggleRepeat);
   $("#mute").addEventListener("click",toggleMute);
