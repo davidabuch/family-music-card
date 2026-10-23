@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.65";
+const APP_VERSION = "0.2.66";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -46,6 +46,8 @@ const state = {
   lastGroupChange: null,
   actionTrace: [],
   transportPending: false,
+  wholeHouseStopPending: false,
+  wholeHouseStopConfirmUntil: 0,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -299,10 +301,68 @@ function wholeHouseMarkup(session) {
     <span class="whole-house-chevron">›</span></button>`;
 }
 
+async function stopWholeHouse() {
+  const button = $("#stopAllMusic");
+  if (state.wholeHouseStopPending || !state.stateAvailable) return;
+  const now = Date.now();
+  if (now > state.wholeHouseStopConfirmUntil) {
+    state.wholeHouseStopConfirmUntil = now + 10000;
+    button.textContent = "Confirm Stop All";
+    button.classList.add("confirm");
+    window.setTimeout(() => {
+      if (Date.now() >= state.wholeHouseStopConfirmUntil && !state.wholeHouseStopPending) {
+        state.wholeHouseStopConfirmUntil = 0;
+        button.textContent = "Stop All";
+        button.classList.remove("confirm");
+      }
+    }, 10050);
+    return;
+  }
+  state.wholeHouseStopConfirmUntil = 0;
+  state.wholeHouseStopPending = true;
+  button.disabled = true;
+  button.textContent = "Stopping…";
+  const failures = [];
+  let stopped = 0;
+  try {
+    // Fresh observation immediately before the household-wide write. Use one
+    // request per active session; never send commands to grouped child rooms.
+    const refreshed = await refreshState();
+    if (!refreshed) throw new Error("Cannot verify current house playback");
+    const {active} = wholeHouseSessions();
+    for (const session of active) {
+      try {
+        await within(api("/api/transport", {method:"POST",
+          body:JSON.stringify({queue_id:session.id,action:"pause",
+            request_id:crypto.randomUUID()})}), 15000);
+        stopped++;
+      } catch (error) {
+        failures.push(session.label);
+        traceAction("whole_house_stop_error", {player:session.id, error:error.message});
+      }
+    }
+    await refreshState();
+    showToast(failures.length
+      ? `Paused ${stopped}; could not confirm: ${failures.join(", ")}`
+      : stopped ? `Paused ${stopped} music ${stopped === 1 ? "session" : "sessions"}`
+        : "No music currently playing", failures.length ? 6000 : 2600);
+  } catch (error) {
+    showToast(error.message, 4500);
+  } finally {
+    state.wholeHouseStopPending = false;
+    button.disabled = false;
+    button.textContent = "Stop All";
+    button.classList.remove("confirm");
+    renderWholeHouse();
+  }
+}
+
 function renderWholeHouse() {
   const body = $("#wholeHouseBody");
   if (!body || state.view !== "wholehouse") return;
   const {active, idle} = wholeHouseSessions();
+  const stopButton = $("#stopAllMusic");
+  if (stopButton && !state.wholeHouseStopPending && !state.wholeHouseStopConfirmUntil) stopButton.disabled = active.length === 0;
   const expanded = body.querySelector("#idleRooms")?.open || false;
   body.innerHTML = `<p class="whole-house-summary">${active.length} active music ${active.length === 1 ? "session" : "sessions"}</p>
     <div class="whole-house-list">${active.length ? active.map(wholeHouseMarkup).join("") :
@@ -1505,6 +1565,7 @@ function startVoiceSearch() {
 }
 
 function wire() {
+  $("#stopAllMusic").addEventListener("click", stopWholeHouse);
   document.querySelectorAll(".tabbar button[data-view]").forEach((button)=>button.addEventListener("click",()=>setView(button.dataset.view)));
   document.querySelectorAll(".back-now").forEach((b)=>b.addEventListener("click",()=>setView("now")));
   document.querySelectorAll(".search-profile").forEach((button)=>{

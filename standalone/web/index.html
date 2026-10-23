@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="Family Music">
   <title>Family Music</title>
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/styles.css?v=0.2.65">
+  <link rel="stylesheet" href="/styles.css?v=0.2.66">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/approved-v2/icon-32.png"><link rel="icon" type="image/png" sizes="16x16" href="/icons/approved-v2/icon-16.png"><link rel="shortcut icon" href="/favicon.ico"><link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=approved-v2"><link rel="apple-touch-icon-precomposed" sizes="180x180" href="/apple-touch-icon-precomposed.png?v=approved-v2"></head>
 <body>
   <main id="app" class="app-shell">
@@ -57,7 +57,7 @@
       <div id="overlay" class="overlay"></div>
     </section>
 
-    <section id="wholehouseView" class="view browser-view"><header><button class="back-now" aria-label="Back to Now Playing">‹</button><h2>Whole House</h2></header><div id="wholeHouseBody" class="content"></div></section>
+    <section id="wholehouseView" class="view browser-view"><header><button class="back-now" aria-label="Back to Now Playing">‹</button><h2>Whole House</h2><button id="stopAllMusic" type="button" aria-label="Stop music in all rooms">Stop All</button></header><div id="wholeHouseBody" class="content"></div></section>
     <section id="favoritesView" class="view browser-view"><header><button class="back-now">‹</button><h2>Favorites</h2></header><div class="provider-row" aria-label="Filter favorites by person"><button class="favorite-profile active" data-favorite-profile="all" aria-pressed="true">Everyone</button><button class="favorite-profile" data-favorite-profile="david" aria-pressed="false">David</button><button class="favorite-profile" data-favorite-profile="kaelah" aria-pressed="false">Kaelah</button><button class="favorite-profile" data-favorite-profile="alexis" aria-pressed="false">Alexis</button></div><p class="favorites-profile-note">Personal favorites are queried separately for each connected music account. David includes his Spotify and Apple Music, Kaelah her Spotify, and Alexis her Apple Music. Sonos Favorites remain shared under Everyone and David.</p><div class="provider-row" aria-label="Filter favorites by service"><button class="favorite-provider active" data-favorite-provider="all" aria-pressed="true">All</button><button class="favorite-provider" data-favorite-provider="apple" aria-pressed="false">Apple Music</button><button class="favorite-provider" data-favorite-provider="spotify" aria-pressed="false">Spotify</button><button class="favorite-provider" data-favorite-provider="library" aria-pressed="false">Library</button><button class="favorite-provider" data-favorite-provider="sonos" aria-pressed="false">Sonos</button></div><div id="favoritesBody" class="content"></div></section>
     <section id="recentsView" class="view browser-view"><header><button class="back-now">‹</button><h2>Recently Played</h2></header><div id="recentsBody" class="content"></div></section>
     <section id="searchView" class="view browser-view">
@@ -78,6 +78,6 @@
     </details>
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
   </main>
-  <script src="/app.js?v=0.2.65" defer></script>
+  <script src="/app.js?v=0.2.66" defer></script>
 </body>
 </html>
