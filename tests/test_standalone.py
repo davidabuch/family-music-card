@@ -1276,3 +1276,16 @@ def test_artwork_track_list_ui_and_safe_routing():
     assert '"/api/play-queue-index"' in server
     assert 'player_queues/play_index' in server
     assert '_require_allowed_destination(queue_id)' in server
+
+
+def test_ios_artwork_long_hold_disables_native_image_menu():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "standalone/web"
+    css = (root / "styles.css").read_text()
+    js = (root / "app.js").read_text()
+    assert "-webkit-touch-callout:none!important" in css
+    assert "#artwork img { pointer-events:none" in css
+    assert 'artwork.addEventListener("touchstart"' in js
+    assert "event.preventDefault();" in js
+    assert "{passive:false}" in js
+    assert "}, 1000);" in js
