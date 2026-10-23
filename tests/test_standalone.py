@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.65"' in app_config
+    assert 'version: "0.2.66"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1289,3 +1289,17 @@ def test_ios_artwork_long_hold_disables_native_image_menu():
     assert "event.preventDefault();" in js
     assert "{passive:false}" in js
     assert "}, 1000);" in js
+
+
+def test_whole_house_stop_all_requires_confirmation_and_targets_active_sessions():
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1] / "standalone/web"
+    html = (root / "index.html").read_text()
+    js = (root / "app.js").read_text()
+    assert 'id="stopAllMusic"' in html
+    assert 'async function stopWholeHouse()' in js
+    assert 'state.wholeHouseStopConfirmUntil = now + 10000' in js
+    assert 'const {active} = wholeHouseSessions()' in js
+    assert 'action:"pause"' in js
+    assert 'for (const session of active)' in js
+    assert 'await refreshState()' in js
