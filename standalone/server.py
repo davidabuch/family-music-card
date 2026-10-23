@@ -1399,7 +1399,9 @@ class Handler(BaseHTTPRequestHandler):
                 queue_id = str(body.get("queue_id") or "")
                 index = body.get("index")
                 if not queue_id or type(index) is not int or not 0 <= index < 200:
-                    self._send_json({"error": "Invalid queue or track index"}, HTTPStatus.BAD_REQUEST)
+                    self._send_json(
+                        {"error": "Invalid queue or track index"}, HTTPStatus.BAD_REQUEST
+                    )
                     return
                 _require_allowed_destination(queue_id)
                 queues = get_queues()
