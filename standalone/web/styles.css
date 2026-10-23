@@ -88,3 +88,8 @@
 .track-detail small{font-size:11px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .track-list-empty{padding:24px 12px;color:#aaa;font-size:13px}
 .artwork{touch-action:pan-y;-webkit-user-select:none;user-select:none}
+
+/* Prevent iOS image preview/Share menu from intercepting the one-second hold. */
+#artwork, #artwork img, #artwork span { -webkit-touch-callout:none!important; -webkit-user-select:none!important; user-select:none!important; }
+#artwork { touch-action:none; }
+#artwork img { pointer-events:none; -webkit-user-drag:none; }
