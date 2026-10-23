@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.64";
+const APP_VERSION = "0.2.65";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -1568,6 +1568,12 @@ function wire() {
   for (const event of ["pointerup", "pointercancel", "pointerleave"]) {
     artwork.addEventListener(event, cancelArtworkHold);
   }
+  // iOS Safari can open the native image Share menu before the hold timer.
+  // A non-passive touchstart cancellation suppresses that native gesture while
+  // pointer events continue to drive our own one-second hold.
+  artwork.addEventListener("touchstart", event => {
+    if (event.touches.length === 1) event.preventDefault();
+  }, {passive:false});
   artwork.addEventListener("contextmenu", event => event.preventDefault());
   $("#shuffle").addEventListener("click",toggleShuffle);
   $("#repeat").addEventListener("click",toggleRepeat);
