@@ -93,3 +93,9 @@
 #artwork, #artwork img, #artwork span { -webkit-touch-callout:none!important; -webkit-user-select:none!important; user-select:none!important; }
 #artwork { touch-action:none; }
 #artwork img { pointer-events:none; -webkit-user-drag:none; }
+
+/* Household stop control: explicit confirmation before affecting every room. */
+#wholehouseView header h2{flex:1}
+#stopAllMusic{flex-shrink:0;border:1px solid #e35a65;border-radius:999px;padding:10px 12px;background:#65232a;color:#fff;font-size:12px;font-weight:800;min-height:42px}
+#stopAllMusic.confirm{background:#c72e40}
+#stopAllMusic:disabled{opacity:.45}
