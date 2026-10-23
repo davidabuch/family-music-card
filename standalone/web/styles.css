@@ -73,3 +73,18 @@
 .whole-house-chevron{font-size:28px;color:#aaa}.whole-house-empty{color:#aaa}
 #idleRooms{margin-top:22px;border-top:1px solid #ffffff22;padding-top:16px}
 #idleRooms summary{font-weight:700;cursor:pointer;padding:8px 0 16px}
+
+/* Artwork/queue-list flip, matching the original square artwork footprint. */
+[hidden]{display:none!important}
+.track-list-panel{width:100%;aspect-ratio:1;margin:0 auto 16px;border-radius:19px;background:#211f1d;border:1px solid #ffffff20;overflow:hidden;display:flex;flex-direction:column;flex-shrink:0}
+.track-list-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #ffffff1b;font-size:14px}
+.track-list-header button{background:#ffffff14;border:0;border-radius:9px;color:#fff;font-size:21px;width:36px;height:32px}
+.track-list-scroll{overflow-y:auto;overscroll-behavior:contain;min-height:0;flex:1}
+.track-list-row{width:100%;display:flex;gap:11px;align-items:center;padding:10px 13px;border:0;border-bottom:1px solid #ffffff0d;background:transparent;color:#fff;text-align:left;min-height:54px}
+.track-list-row.current{background:#ffffff16;color:#8bcaff}
+.track-number{width:22px;text-align:center;color:#aaa;font-size:12px}
+.track-detail{display:flex;flex-direction:column;gap:3px;min-width:0}
+.track-detail strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track-detail small{font-size:11px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track-list-empty{padding:24px 12px;color:#aaa;font-size:13px}
+.artwork{touch-action:pan-y;-webkit-user-select:none;user-select:none}
