@@ -1303,3 +1303,15 @@ def test_whole_house_stop_all_requires_confirmation_and_targets_active_sessions(
     assert 'action:"pause"' in js
     assert 'for (const session of active)' in js
     assert 'await refreshState()' in js
+
+
+def test_airplay_icon_tracks_selected_room_physical_playback():
+    index = (ROOT / "standalone" / "web" / "index.html").read_text()
+    styles = (ROOT / "standalone" / "web" / "styles.css").read_text()
+    app = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert 'class="airplay-icon"' in index
+    assert 'viewBox="0 0 48 48"' in index
+    assert 'color:#d1d1d1' in styles
+    assert '.destination-pill.is-playing .speaker-icon{color:#0a84ff}' in styles
+    assert '$("#destination").classList.toggle("is-playing", destinationIsPlaying(player));' in app
+    assert 'return observedPlayback(player) === "playing";' in app
