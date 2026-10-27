@@ -12,7 +12,7 @@ init: false
 host_network: true
 webui: "[PROTO:http]://[HOST]:[PORT:8099]"
 watchdog: http://[HOST]:8099/api/health
-stage: experimental
+stage: stable
 options:
   ma_url: http://127.0.0.1:8095
   ma_token: null
