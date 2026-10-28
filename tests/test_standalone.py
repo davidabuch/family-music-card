@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.70"' in app_config
+    assert 'version: "0.2.71"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1328,3 +1328,12 @@ def test_shuffle_uses_physical_sonos_state_and_rejects_stale_queue():
     assert 'error.status === 502' in js
     assert 'await api("/api/native-mode-control", {method:"POST"' in js
     assert 'state.nativeModesFetchedAt = 0;' in js
+
+
+def test_native_sonos_mode_refresh_is_defined_and_failure_safe():
+    js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert 'async function refreshNativeModes() {' in js
+    assert '"/api/native-modes?queue_id="' in js
+    assert 'state.nativeModes = {available: false};' in js
+    assert 'Date.now() - state.nativeModesFetchedAt < 5000' in js
+    assert 'void refreshNativeModes();' in js

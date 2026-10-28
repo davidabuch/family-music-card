@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.70";
+const APP_VERSION = "0.2.71";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -1165,6 +1165,40 @@ async function toggleMute() {
     state.pendingMute = null;
     renderNow();
     showToast(error.message, 3000);
+  }
+}
+
+async function refreshNativeModes() {
+  const player = selectedPlayer();
+  if (!player || !isPhysicalSonos(player)) {
+    state.nativeModes = null;
+    state.nativeModesPlayerId = null;
+    state.nativeModesFetchedAt = 0;
+    return;
+  }
+  const playerId = player.player_id;
+  if (state.nativeModesPlayerId === playerId &&
+      Date.now() - state.nativeModesFetchedAt < 5000) return;
+  // Reserve the refresh window before awaiting to coalesce polling calls.
+  state.nativeModesPlayerId = playerId;
+  state.nativeModesFetchedAt = Date.now();
+  try {
+    const modes = await api("/api/native-modes?queue_id=" + encodeURIComponent(playerId),
+      {cache: "no-store"});
+    // Ignore stale observations after destination changes.
+    if (selectedPlayer()?.player_id !== playerId) return;
+    state.nativeModes = modes;
+    state.nativeModesPlayerId = playerId;
+    state.nativeModesFetchedAt = Date.now();
+    renderNow();
+  } catch (error) {
+    // Native modes are optional. A failed observation must not produce
+    // recurring toast errors or incorrectly mark shuffle as enabled.
+    if (selectedPlayer()?.player_id !== playerId) return;
+    state.nativeModes = {available: false};
+    state.nativeModesPlayerId = playerId;
+    state.nativeModesFetchedAt = Date.now();
+    renderNow();
   }
 }
 
