@@ -1177,6 +1177,11 @@ async function refreshNativeModes() {
     return;
   }
   const playerId = player.player_id;
+  if (state.nativeModesPlayerId === playerId &&
+      Date.now() - state.nativeModesFetchedAt < 5000) return;
+  // Reserve the refresh window before awaiting to coalesce polling calls.
+  state.nativeModesPlayerId = playerId;
+  state.nativeModesFetchedAt = Date.now();
   try {
     const modes = await api("/api/native-modes?queue_id=" + encodeURIComponent(playerId),
       {cache: "no-store"});
