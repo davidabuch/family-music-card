@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.67";
+const APP_VERSION = "0.2.68";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -561,6 +561,7 @@ function renderNow() {
   $("#trackTitle").textContent = mediaName(item);
   $("#trackMeta").textContent = mediaArtist(item) || "—";
   $("#destinationName").textContent = player ? playerName(player) : "Speaker unavailable";
+  $("#destination").classList.toggle("is-playing", destinationIsPlaying(player));
 
   const artwork = $("#artwork");
   const image = mediaImage(item);
