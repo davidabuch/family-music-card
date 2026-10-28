@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.69"' in app_config
+    assert 'version: "0.2.70"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1317,3 +1317,14 @@ def test_airplay_icon_tracks_selected_room_physical_playback():
     assert '.destination-pill.is-playing .speaker-icon{color:#0a84ff}' in styles
     assert '$("#destination").classList.toggle("is-playing", destinationIsPlaying(player));' in app
     assert 'return observedPlayback(player) === "playing";' in app
+
+
+def test_shuffle_uses_physical_sonos_state_and_rejects_stale_queue():
+    js = (ROOT / "standalone" / "web" / "app.js").read_text()
+    assert 'if (observedPlayback(player) !== queue.state) return false;' in js
+    assert 'if (isPhysicalSonos(player) && (!queueUri || !physicalUri)) return false;' in js
+    assert 'const nativeObserved = isPhysicalSonos(player) && native?.available;' in js
+    assert 'nativeObserved ? Boolean(native.shuffle)' in js
+    assert 'error.status === 502' in js
+    assert 'await api("/api/native-mode-control", {method:"POST"' in js
+    assert 'state.nativeModesFetchedAt = 0;' in js

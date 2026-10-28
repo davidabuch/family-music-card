@@ -1,4 +1,4 @@
-const APP_VERSION = "0.2.69";
+const APP_VERSION = "0.2.70";
 const GROUP_CONFIRM_MS = 30000;
 const state = {
   players: [],
@@ -95,9 +95,12 @@ function selectedQueue() {
 
 function maQueueActive(queue = selectedQueue(), player = selectedPlayer()) {
   if (!queue || !["playing", "paused"].includes(queue.state)) return false;
+  // The physical player's current source is authoritative. A stale MA queue
+  // must not make native Sonos playback appear MA-controlled.
+  if (observedPlayback(player) !== queue.state) return false;
   const queueUri = queue.current_item?.media_item?.uri;
   const physicalUri = player?.current_media?.uri;
-  // External Sonos playback can leave a stale MA queue marked active.
+  if (isPhysicalSonos(player) && (!queueUri || !physicalUri)) return false;
   if (queueUri && physicalUri && queueUri !== physicalUri) return false;
   return true;
 }
@@ -598,7 +601,7 @@ function renderNow() {
   $("#remaining").textContent = `-${formatTime(Math.max(0, duration - position))}`;
 
   const queueControllable = maQueueActive(queue, player);
-  const native = !queueControllable && state.nativeModesPlayerId === player?.player_id
+  const native = state.nativeModesPlayerId === player?.player_id
     ? state.nativeModes : null;
   const modesAvailable = queueControllable || Boolean(native?.available);
   const previous = $("#previous");
@@ -613,9 +616,14 @@ function renderNow() {
   const repeat = $("#repeat");
   shuffle.disabled = !modesAvailable;
   repeat.disabled = !modesAvailable;
-  const shuffleOn = queueControllable ? Boolean(queue.shuffle_enabled) : Boolean(native?.shuffle);
+  // For physical Sonos, show its observed mode rather than a potentially
+  // stale Music Assistant queue flag. For other players MA owns the mode.
+  const nativeObserved = isPhysicalSonos(player) && native?.available;
+  const shuffleOn = nativeObserved ? Boolean(native.shuffle)
+    : queueControllable ? Boolean(queue.shuffle_enabled) : false;
   shuffle.classList.toggle("active", modesAvailable && shuffleOn);
-  const repeatMode = queueControllable ? queue.repeat_mode || "off" : native?.repeat || "off";
+  const repeatMode = nativeObserved ? native.repeat || "off"
+    : queueControllable ? queue.repeat_mode || "off" : "off";
   repeat.classList.toggle("active", repeatMode !== "off");
   repeat.innerHTML = repeatMode === "one"
     ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/><text x="12" y="15" font-size="9" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>'
@@ -1164,54 +1172,58 @@ async function queueControl(action, value) {
   const player = selectedPlayer();
   const queue = selectedQueue();
   const maActive = maQueueActive(queue, player);
-  const qid = maActive ? queue?.queue_id : player?.player_id;
-  if (!qid) return;
-  if (!maActive && !(isPhysicalSonos(player) && state.nativeModesPlayerId === player.player_id && state.nativeModes?.available)) {
+  const nativeAvailable = isPhysicalSonos(player) &&
+    state.nativeModesPlayerId === player.player_id && state.nativeModes?.available;
+  const modeAction = action === "shuffle" || action === "repeat";
+  if (modeAction && !maActive && !nativeAvailable) {
     showToast("Shuffle and repeat unavailable for this source", 3000);
     return;
   }
-  const endpoint = maActive ? "/api/queue-control" : "/api/native-mode-control";
+  const qid = maActive ? queue?.queue_id : player?.player_id;
+  if (!qid) return;
+  const endpoint = modeAction && !maActive ? "/api/native-mode-control" : "/api/queue-control";
   try {
     await api(endpoint, {method:"POST", body:JSON.stringify({queue_id:qid, action, value})});
-    state.nativeModesFetchedAt = 0;
-    await refreshState();
-    await refreshNativeModes();
-  } catch (error) { showToast(error.message, 3000); }
+  } catch (error) {
+    // MA may report a stale queue as active but reject its shuffle/repeat
+    // command. A Sonos-native fallback is safe only when we have a fresh
+    // physical mode observation; never retry unknown/timeout outcomes.
+    if (!(modeAction && maActive && nativeAvailable && error.status === 502)) {
+      showToast(error.message, 3000);
+      return;
+    }
+    try {
+      await api("/api/native-mode-control", {method:"POST",
+        body:JSON.stringify({queue_id:player.player_id, action, value})});
+    } catch (fallbackError) {
+      showToast(fallbackError.message, 3000);
+      return;
+    }
+  }
+  state.nativeModesFetchedAt = 0;
+  await refreshState();
+  await refreshNativeModes();
 }
 
 function toggleShuffle() {
+  const player = selectedPlayer();
   const queue = selectedQueue();
-  const maActive = maQueueActive(queue, selectedPlayer());
-  const current = maActive ? Boolean(queue.shuffle_enabled) : Boolean(state.nativeModes?.shuffle);
-  queueControl("shuffle", !current);
+  const native = state.nativeModesPlayerId === player?.player_id ? state.nativeModes : null;
+  const current = isPhysicalSonos(player) && native?.available
+    ? Boolean(native.shuffle)
+    : maQueueActive(queue, player) ? Boolean(queue.shuffle_enabled) : false;
+  void queueControl("shuffle", !current);
 }
 
 function toggleRepeat() {
-  const queue = selectedQueue();
-  const maActive = maQueueActive(queue, selectedPlayer());
-  const current = maActive ? queue.repeat_mode || "off" : state.nativeModes?.repeat || "off";
-  const next = current === "off" ? "one" : current === "one" ? "all" : "off";
-  queueControl("repeat", next);
-}
-
-async function refreshNativeModes() {
   const player = selectedPlayer();
-  if (!player) return;
-  if (Date.now() - state.nativeModesFetchedAt < 12000
-      && state.nativeModesPlayerId === player.player_id) return;
-  state.nativeModesFetchedAt = Date.now();
-  state.nativeModesPlayerId = player.player_id;
-  if (!player.player_id.startsWith("RINCON_")) {
-    state.nativeModes = null;
-    return;
-  }
-  try {
-    const modes = await api("/api/native-modes?queue_id=" + encodeURIComponent(player.player_id));
-    if (state.nativeModesPlayerId === player.player_id) state.nativeModes = modes;
-  } catch (_) {
-    state.nativeModes = null;
-  }
-  renderNow();
+  const queue = selectedQueue();
+  const native = state.nativeModesPlayerId === player?.player_id ? state.nativeModes : null;
+  const current = isPhysicalSonos(player) && native?.available
+    ? native.repeat || "off"
+    : maQueueActive(queue, player) ? queue.repeat_mode || "off" : "off";
+  const next = current === "off" ? "one" : current === "one" ? "all" : "off";
+  void queueControl("repeat", next);
 }
 
 function seekTo(percent) {
