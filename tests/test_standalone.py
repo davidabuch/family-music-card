@@ -119,7 +119,7 @@ def test_haos_app_package_keeps_home_assistant_out_of_runtime_path():
     run_script = (ROOT / "standalone" / "run.sh").read_text()
 
     assert "name: Family Music" in repo_config
-    assert 'version: "0.2.68"' in app_config
+    assert 'version: "0.2.69"' in app_config
     assert "host_network: true" in app_config
     assert "http://127.0.0.1:8095" in app_config
     assert "ma_token: password" in app_config
@@ -1311,6 +1311,8 @@ def test_airplay_icon_tracks_selected_room_physical_playback():
     app = (ROOT / "standalone" / "web" / "app.js").read_text()
     assert 'class="airplay-icon"' in index
     assert 'viewBox="0 0 48 48"' in index
+    assert 'M8 34 C2 22 10 5 24 5' in index
+    assert 'M14 32 C9 22 15 12 24 12' in index
     assert 'color:#d1d1d1' in styles
     assert '.destination-pill.is-playing .speaker-icon{color:#0a84ff}' in styles
     assert '$("#destination").classList.toggle("is-playing", destinationIsPlaying(player));' in app
